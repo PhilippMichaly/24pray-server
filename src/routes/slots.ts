@@ -19,9 +19,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient })
     const project = await prisma.prayerProject.findUnique({ where: { id } });
     if (!project) throw httpError(404, 'Projekt nicht gefunden');
     if (project.visibility === 'PRIVATE' && req.user?.id !== project.organizerId) {
-      // Private project grid is still viewable by anyone with the project id via join flow;
-      // restrict to organizer + logged-in users that reach it. Keep simple: allow if logged in.
-      if (!req.user) throw httpError(403, 'Kein Zugriff');
+      throw httpError(403, 'Kein Zugriff');
     }
     const slots = await prisma.prayerSlot.findMany({
       where: { projectId: id, status: 'BOOKED' },
@@ -48,26 +46,28 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient })
       throw httpError(400, 'Zeitfenster liegt außerhalb des Projektzeitraums');
     }
 
-    const existing = await prisma.prayerSlot.findFirst({
-      where: { projectId: id, startTime, status: 'BOOKED' },
-    });
-    if (existing) throw httpError(409, 'Dieses Zeitfenster ist bereits belegt');
-
     // Logged-in user OR guest (needs a name)
     const userId = req.user?.id ?? null;
     if (!userId && !body.guestName) throw httpError(400, 'Name erforderlich für Gastbuchung');
 
-    return prisma.prayerSlot.create({
-      data: {
-        projectId: id,
-        userId,
-        startTime,
-        endTime,
-        status: 'BOOKED',
-        guestName: userId ? null : body.guestName,
-        guestEmail: userId ? null : body.guestEmail,
-        notifyChannel: body.notifyChannel,
-      },
+    return prisma.$transaction(async (tx) => {
+      const existing = await tx.prayerSlot.findFirst({
+        where: { projectId: id, startTime, status: 'BOOKED' },
+      });
+      if (existing) throw httpError(409, 'Dieses Zeitfenster ist bereits belegt');
+
+      return tx.prayerSlot.create({
+        data: {
+          projectId: id,
+          userId,
+          startTime,
+          endTime,
+          status: 'BOOKED',
+          guestName: userId ? null : body.guestName,
+          guestEmail: userId ? null : body.guestEmail,
+          notifyChannel: body.notifyChannel,
+        },
+      });
     });
   });
 

@@ -8,10 +8,14 @@ let db: TestDb;
 let app: FastifyInstance;
 const captured: { email: string; url: string }[] = [];
 
+let loginSeq = 0;
 async function loginAs(email: string): Promise<string> {
-  await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email } });
+  // Distinct source IP per login so the /auth/magic-link per-IP rate limit
+  // (5/min) doesn't accumulate across tests in this file.
+  const remoteAddress = `10.0.0.${++loginSeq}`;
+  await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email }, remoteAddress });
   const token = new URL(captured.at(-1)!.url).searchParams.get('token')!;
-  const verify = await app.inject({ method: 'POST', url: '/auth/verify', payload: { token } });
+  const verify = await app.inject({ method: 'POST', url: '/auth/verify', payload: { token }, remoteAddress });
   return verify.cookies.find((c) => c.name === 'session')!.value;
 }
 
@@ -50,6 +54,34 @@ describe('projects', () => {
 
     const direct = await app.inject({ method: 'GET', url: `/projects/${proj.id}`, cookies: { session: bob } });
     expect(direct.statusCode).toBe(403);
+  });
+
+  it('inviteToken only leaks to the organizer', async () => {
+    const alice = await loginAs('alice-token@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: alice },
+      payload: { title: 'Tokentest', startDate: future(1), endDate: future(4), visibility: 'PUBLIC' },
+    });
+    expect(create.statusCode).toBe(200);
+    const proj = create.json();
+    // Organizer (the creator) sees their own token.
+    expect(proj.inviteToken).not.toBe('');
+
+    // A different logged-in user listing the PUBLIC project gets an empty token.
+    const bob = await loginAs('bob-token@example.com');
+    const list = await app.inject({ method: 'GET', url: '/projects', cookies: { session: bob } });
+    const listed = list.json().find((p: { id: string }) => p.id === proj.id);
+    expect(listed).toBeTruthy();
+    expect(listed.inviteToken).toBe('');
+
+    // ...and getting it directly also gets an empty token.
+    const get = await app.inject({ method: 'GET', url: `/projects/${proj.id}`, cookies: { session: bob } });
+    expect(get.statusCode).toBe(200);
+    expect(get.json().inviteToken).toBe('');
+
+    // The organizer getting it directly still sees the token.
+    const mine = await app.inject({ method: 'GET', url: `/projects/${proj.id}`, cookies: { session: alice } });
+    expect(mine.json().inviteToken).not.toBe('');
   });
 
   it('create requires auth', async () => {

@@ -24,7 +24,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
       include: { organizer: true },
       orderBy: { createdAt: 'desc' },
     });
-    return Promise.all(projects.map((p) => toProjectWithStats(prisma, p)));
+    return Promise.all(projects.map((p) => toProjectWithStats(prisma, p, req.user?.id)));
   });
 
   // Create
@@ -48,7 +48,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
       },
       include: { organizer: true },
     });
-    return toProjectWithStats(prisma, project);
+    return toProjectWithStats(prisma, project, user.id);
   });
 
   // Get one
@@ -59,7 +59,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
     if (project.visibility === 'PRIVATE' && req.user?.id !== project.organizerId) {
       throw httpError(403, 'Kein Zugriff auf dieses Projekt');
     }
-    return toProjectWithStats(prisma, project);
+    return toProjectWithStats(prisma, project, req.user?.id);
   });
 
   // Patch (organizer only)
@@ -83,7 +83,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
       },
       include: { organizer: true },
     });
-    return toProjectWithStats(prisma, updated);
+    return toProjectWithStats(prisma, updated, user.id);
   });
 
   // Join by invite token
@@ -91,6 +91,6 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
     const { token } = req.params as { token: string };
     const project = await prisma.prayerProject.findUnique({ where: { inviteToken: token }, include: { organizer: true } });
     if (!project) throw httpError(404, 'Einladung ungültig');
-    return toProjectWithStats(prisma, project);
+    return toProjectWithStats(prisma, project, undefined);
   });
 }

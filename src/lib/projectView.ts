@@ -20,6 +20,7 @@ export interface ProjectWithStats {
 export async function toProjectWithStats(
   prisma: PrismaClient,
   project: PrayerProject & { organizer?: { name: string } },
+  requesterId?: string,
 ): Promise<ProjectWithStats> {
   const organizerName =
     project.organizer?.name ??
@@ -42,7 +43,7 @@ export async function toProjectWithStats(
     startDate: project.startDate.toISOString(),
     endDate: project.endDate.toISOString(),
     timezone: project.timezone,
-    inviteToken: project.inviteToken,
+    inviteToken: project.organizerId === requesterId ? project.inviteToken : '',
     organizerId: project.organizerId,
     createdAt: project.createdAt.toISOString(),
     totalSlots,
