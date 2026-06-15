@@ -1,0 +1,9 @@
+import { PrismaClient } from '@prisma/client';
+
+export function createPrisma(databaseUrl?: string): PrismaClient {
+  return new PrismaClient(
+    databaseUrl ? { datasources: { db: { url: databaseUrl } } } : undefined,
+  );
+}
+
+export const prisma = createPrisma();
