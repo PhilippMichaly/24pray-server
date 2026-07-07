@@ -9,6 +9,7 @@ export const CreateProjectBody = z.object({
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
   timezone: z.string().min(1).default('Europe/Berlin'),
+  slotDurationMinutes: z.number().int().positive().max(1440).default(60),
   visibility: ProjectVisibility.default('PRIVATE'),
 });
 

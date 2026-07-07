@@ -29,6 +29,7 @@ model PrayerProject {
   startDate   DateTime
   endDate     DateTime
   timezone    String       @default("Europe/Berlin")
+  slotDurationMinutes Int    @default(60) // Schrittweite des Slot-Grids (§6.2)
   inviteToken String       @unique
   organizerId String
   organizer   User         @relation("OrganizerProjects", fields: [organizerId], references: [id])
@@ -47,6 +48,7 @@ model PrayerSlot {
   status        String        @default("BOOKED") // BOOKED | COMPLETED | CANCELLED
   guestName     String?
   guestEmail    String?
+  guestToken    String?       @unique // Secret für Gast-Selbst-Storno (§6.3)
   notifyChannel String        @default("EMAIL") // EMAIL | TELEGRAM
 
   @@index([projectId, startTime])

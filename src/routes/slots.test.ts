@@ -111,4 +111,48 @@ describe('slots', () => {
     const res = await app.inject({ method: 'DELETE', url: `/slots/${slotId}`, cookies: { session: mallory } });
     expect(res.statusCode).toBe(403);
   });
+
+  it('grid marks the requester own slot as isMine', async () => {
+    const alice = await loginAs('alice-mine@example.com');
+    const projectId = await makeProject(alice);
+    await app.inject({
+      method: 'POST', url: `/projects/${projectId}/slots`, cookies: { session: alice },
+      payload: { startTime: at(3) },
+    });
+    const grid = await app.inject({ method: 'GET', url: `/projects/${projectId}/slots`, cookies: { session: alice } });
+    const mine = grid.json().find((s: { startTime: string }) => s.startTime === at(3));
+    expect(mine.isMine).toBe(true);
+    expect(mine.slotId).toBeTruthy();
+  });
+
+  it('guest booking mints a guestToken; guest can self-cancel with it; foreign token = 403', async () => {
+    const alice = await loginAs('alice-guest@example.com');
+    const projectId = await makeProject(alice);
+
+    // Gast bucht ohne Session (nur Name/E-Mail).
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${projectId}/slots`,
+      payload: { startTime: at(4), guestName: 'Gast Gustav', guestEmail: 'gustav@example.com' },
+    });
+    expect(book.statusCode).toBe(200);
+    const { id: slotId, guestToken } = book.json();
+    expect(guestToken).toBeTruthy();
+
+    // Anonymer Betrachter sieht den Namen maskiert.
+    const anonGrid = await app.inject({ method: 'GET', url: `/projects/${projectId}/slots` });
+    const gslot = anonGrid.json().find((s: { startTime: string }) => s.startTime === at(4));
+    expect(gslotName(gslot)).toBe('Gast G.');
+
+    // Falscher Token → 403.
+    const wrong = await app.inject({ method: 'DELETE', url: `/slots/${slotId}?guestToken=nope` });
+    expect(wrong.statusCode).toBe(403);
+
+    // Richtiger Token → 204.
+    const ok = await app.inject({ method: 'DELETE', url: `/slots/${slotId}?guestToken=${guestToken}` });
+    expect(ok.statusCode).toBe(204);
+  });
 });
+
+function gslotName(s: { userName: string | null }): string | null {
+  return s.userName;
+}

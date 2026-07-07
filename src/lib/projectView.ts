@@ -9,6 +9,7 @@ export interface ProjectWithStats {
   startDate: string;
   endDate: string;
   timezone: string;
+  slotDurationMinutes: number;
   inviteToken: string;
   organizerId: string;
   createdAt: string;
@@ -29,7 +30,7 @@ export async function toProjectWithStats(
   const bookedSlots = await prisma.prayerSlot.count({
     where: { projectId: project.id, status: 'BOOKED' },
   });
-  const slotMs = 60 * 60 * 1000;
+  const slotMs = project.slotDurationMinutes * 60 * 1000;
   const totalSlots = Math.max(
     0,
     Math.round((project.endDate.getTime() - project.startDate.getTime()) / slotMs),
@@ -43,6 +44,7 @@ export async function toProjectWithStats(
     startDate: project.startDate.toISOString(),
     endDate: project.endDate.toISOString(),
     timezone: project.timezone,
+    slotDurationMinutes: project.slotDurationMinutes,
     inviteToken: project.organizerId === requesterId ? project.inviteToken : '',
     organizerId: project.organizerId,
     createdAt: project.createdAt.toISOString(),

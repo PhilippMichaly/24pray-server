@@ -41,6 +41,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
         startDate: new Date(body.startDate),
         endDate: new Date(body.endDate),
         timezone: body.timezone,
+        slotDurationMinutes: body.slotDurationMinutes,
         visibility: body.visibility,
         status: 'ACTIVE',
         inviteToken: generateToken(),
