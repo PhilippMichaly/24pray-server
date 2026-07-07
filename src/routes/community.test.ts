@@ -171,6 +171,40 @@ describe('W3.4 — Geo-Standorte', () => {
     expect(JSON.stringify(stats.json())).not.toContain('Geo');
     expect(JSON.stringify(stats.json())).not.toContain('Berlin');
   });
+
+  it('verorteter Beter-Slot erscheint als Link mit active-Flag (W3.5, nur Koordinaten)', async () => {
+    const owner = await loginAs('w3-net@example.com');
+    const now = Date.now();
+    const hourStart = new Date(Math.floor(now / 3600_000) * 3600_000 - 3600_000); // laufende Stunde inkl. now
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: {
+        title: 'Netz', startDate: hourStart.toISOString(),
+        endDate: new Date(hourStart.getTime() + 24 * 3600_000).toISOString(), visibility: 'PUBLIC',
+        locationName: 'Köln', locationLat: 50.94, locationLon: 6.96,
+      },
+    });
+    const id = res.json().id;
+    // Gast bucht die GERADE LAUFENDE Stunde mit Standort Nairobi
+    const runningStart = new Date(Math.floor(now / 3600_000) * 3600_000);
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${id}/slots`,
+      payload: {
+        startTime: runningStart.toISOString(), guestName: 'Grace W', guestEmail: 'g@x.de',
+        locationLat: -1.29, locationLon: 36.82,
+      },
+    });
+    expect(book.statusCode).toBe(200);
+
+    const stats = await app.inject({ method: 'GET', url: '/stats/public' });
+    const koeln = (stats.json().points as { lat: number; links: { lat: number; active: boolean }[] }[])
+      .find((p) => Math.abs(p.lat - 50.94) < 0.01);
+    expect(koeln).toBeTruthy();
+    expect(koeln!.links.length).toBe(1);
+    expect(Math.abs(koeln!.links[0].lat - -1.29)).toBeLessThan(0.01);
+    expect(koeln!.links[0].active).toBe(true); // läuft JETZT
+    expect(JSON.stringify(stats.json())).not.toContain('Grace'); // Privacy
+  });
 });
 
 describe('W3 — Recurring', () => {

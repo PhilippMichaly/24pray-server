@@ -62,6 +62,10 @@ model PrayerSlot {
   guestToken    String?       @unique // Secret für Gast-Selbst-Storno (§6.3)
   notifyChannel String        @default("EMAIL") // EMAIL | TELEGRAM
   remindedAt    DateTime?     // Reminder-Job: wann die Erinnerung rausging (W3.2)
+  // Optionaler Beter-Standort (W3.5, Nerven-Netz auf dem Globus): NUR Koordinaten,
+  // bewusst ohne Ortsnamen — öffentlich sichtbar ist nie mehr als ein Lichtpunkt.
+  locationLat   Float?
+  locationLon   Float?
   recurringId   String?
   recurring     RecurringCommitment? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
 

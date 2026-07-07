@@ -97,18 +97,39 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
     const [activeChains, heldSlots, located] = await Promise.all([
       prisma.prayerProject.count({ where: activeWhere }),
       prisma.prayerSlot.count({ where: { status: { in: ['BOOKED', 'COMPLETED'] } } }),
-      // Echte Globus-Punkte: aktive Ketten mit freiwilligem Standort (nur Koordinaten,
-      // kein Name/Titel — auch PRIVATE-Ketten bleiben so anonym).
+      // Nerven-Netz (W3.5): aktive Ketten mit Standort + verortete Beter-Slots.
+      // NUR Koordinaten — nie Namen/Titel; auch PRIVATE-Ketten bleiben anonym.
       prisma.prayerProject.findMany({
         where: { ...activeWhere, locationLat: { not: null }, locationLon: { not: null } },
-        select: { locationLat: true, locationLon: true },
+        select: {
+          locationLat: true,
+          locationLon: true,
+          slots: {
+            where: {
+              status: { in: ['BOOKED', 'COMPLETED'] },
+              locationLat: { not: null },
+              locationLon: { not: null },
+            },
+            select: { locationLat: true, locationLon: true, startTime: true, endTime: true, status: true },
+            take: 40,
+          },
+        },
         take: 60,
       }),
     ]);
     return {
       activeChains,
       heldSlots,
-      points: located.map((p) => ({ lat: p.locationLat, lon: p.locationLon })),
+      points: located.map((p) => ({
+        lat: p.locationLat,
+        lon: p.locationLon,
+        links: p.slots.map((s) => ({
+          lat: s.locationLat,
+          lon: s.locationLon,
+          // „gerade am Beten": Slot läuft in diesem Moment
+          active: s.status === 'BOOKED' && s.startTime <= now && now < s.endTime,
+        })),
+      })),
     };
   });
 
