@@ -29,6 +29,12 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     });
     const url = `${env.APP_URL}/auth/verify?token=${raw}`;
     await mailer.sendMagicLink(email, url);
+    // Testmodus (kein SMTP konfiguriert = kein echtes Deployment): Login-Link direkt
+    // zurückgeben, damit ohne Postfach eingeloggt werden kann. In Produktion ist SMTP
+    // gesetzt → Link wird NIE ausgeliefert (kein Bypass). Siehe README/§Testmodus.
+    if (!env.SMTP_URL) {
+      return reply.code(200).send({ devLoginUrl: url });
+    }
     return reply.code(204).send();
   });
 

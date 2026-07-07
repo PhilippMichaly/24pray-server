@@ -31,7 +31,9 @@ function tokenFrom(url: string): string {
 describe('auth flow', () => {
   it('full cycle: magic-link -> verify -> me -> logout', async () => {
     const ml = await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email: 'a@example.com' } });
-    expect(ml.statusCode).toBe(204);
+    // Ohne SMTP (Testmodus): 200 + devLoginUrl statt 204 (Mail-los einloggbar).
+    expect(ml.statusCode).toBe(200);
+    expect(ml.json().devLoginUrl).toContain('/auth/verify?token=');
     expect(captured.at(-1)!.email).toBe('a@example.com');
 
     const token = tokenFrom(captured.at(-1)!.url);
