@@ -23,7 +23,9 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
 
   const app = Fastify({ logger: false });
 
-  await app.register(cors, { origin: env.APP_URL, credentials: true });
+  // APP_URL immer erlaubt; CORS_ORIGINS fügt weitere Frontend-Origins hinzu (§6.5).
+  const corsOrigins = [env.APP_URL, ...env.CORS_ORIGINS];
+  await app.register(cors, { origin: corsOrigins, credentials: true });
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
 

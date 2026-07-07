@@ -57,12 +57,29 @@ describe('auth flow', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('a magic token cannot be used twice', async () => {
+  it('verify is idempotent within the grace window (StrictMode double-POST)', async () => {
     await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email: 'b@example.com' } });
     const token = tokenFrom(captured.at(-1)!.url);
     const first = await app.inject({ method: 'POST', url: '/auth/verify', payload: { token } });
     expect(first.statusCode).toBe(200);
+    // Sofortiger zweiter POST (React-StrictMode) → weiterhin Erfolg, keine Sackgasse.
     const second = await app.inject({ method: 'POST', url: '/auth/verify', payload: { token } });
-    expect(second.statusCode).toBe(400);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().email).toBe('b@example.com');
+  });
+
+  it('verify rejects a consumed token after the grace window elapsed', async () => {
+    await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email: 'c@example.com' } });
+    const token = tokenFrom(captured.at(-1)!.url);
+    const first = await app.inject({ method: 'POST', url: '/auth/verify', payload: { token } });
+    expect(first.statusCode).toBe(200);
+    // Konsum künstlich altern lassen (jenseits des 30s-Grace-Fensters).
+    const user = await db.prisma.user.findUniqueOrThrow({ where: { email: 'c@example.com' } });
+    await db.prisma.magicToken.updateMany({
+      where: { userId: user.id },
+      data: { consumedAt: new Date(Date.now() - 60_000) },
+    });
+    const late = await app.inject({ method: 'POST', url: '/auth/verify', payload: { token } });
+    expect(late.statusCode).toBe(400);
   });
 });

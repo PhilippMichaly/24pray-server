@@ -6,7 +6,12 @@ const boolish = z
 
 const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
-  APP_URL: z.string().url(),
+  APP_URL: z.string().url(), // Magic-Link-Base UND immer CORS-erlaubte Origin (= Frontend-Host)
+  // Zusätzliche CORS-Origins (Komma-Liste), entkoppelt von APP_URL (§6.5).
+  CORS_ORIGINS: z
+    .string()
+    .default('')
+    .transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean)),
   DATA_DIR: z.string().default('./data'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
   COOKIE_SECURE: boolish.default(false),
