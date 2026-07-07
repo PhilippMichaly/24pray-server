@@ -109,6 +109,10 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
           locationLon: { not: null },
         },
         select: {
+          id: true,
+          title: true,
+          visibility: true,
+          locationName: true,
           locationLat: true,
           locationLon: true,
           slots: {
@@ -130,6 +134,11 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
       points: located.map((p) => ({
         lat: p.locationLat,
         lon: p.locationLon,
+        // Fokus-Flug (W3.7): NUR öffentliche Ketten geben sich zu erkennen —
+        // PRIVATE bleiben ein stilles, anonymes Licht.
+        ...(p.visibility === 'PUBLIC'
+          ? { id: p.id, title: p.title, locationName: p.locationName }
+          : {}),
         links: p.slots.map((s) => ({
           lat: s.locationLat,
           lon: s.locationLon,
@@ -138,6 +147,31 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
         })),
       })),
     };
+  });
+
+  // ── Geocoding (W3.6, GeoNames cities15000) ─────────────
+
+  app.get('/geocode', {
+    config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
+  }, async (req) => {
+    const { q } = (req.query ?? {}) as { q?: string };
+    const term = (q ?? '').trim().toLowerCase();
+    if (term.length < 2) return [];
+    const raw = await prisma.city.findMany({
+      where: { search: { contains: term } },
+      orderBy: { population: 'desc' },
+      take: 30,
+      select: { name: true, country: true, lat: true, lon: true, search: true },
+    });
+    // Ranking: Wortanfang (Name ODER irgendeine Sprachvariante) > Substring; dann Größe.
+    const rank = (c: { name: string; search: string }) =>
+      c.name.toLowerCase().startsWith(term) || c.search.startsWith(term) || c.search.includes(`,${term}`)
+        ? 0
+        : 1;
+    return raw
+      .sort((a, b) => rank(a) - rank(b))
+      .slice(0, 8)
+      .map(({ name, country, lat, lon }) => ({ name, country, lat, lon }));
   });
 
   // ── Reminder-Preference (W3.2) ──────────────────────────

@@ -12,7 +12,8 @@
     "migrate:deploy": "prisma migrate deploy",
     "prisma:generate": "prisma generate",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "import:cities": "tsx --env-file-if-exists=.env scripts/import-cities.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^9.3.1",

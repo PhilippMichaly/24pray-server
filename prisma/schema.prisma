@@ -136,3 +136,17 @@ model Session {
   expiresAt DateTime
   createdAt DateTime @default(now())
 }
+
+// GeoNames cities15000 (CC-BY 4.0, geonames.org) — Geocoding für Ketten-/Beter-Orte (W3.6).
+// `search` = lowercase-Blob aus Name + ASCII + allen Sprachvarianten (München findet Munich).
+model City {
+  id         Int    @id // geonameid
+  name       String
+  country    String
+  lat        Float
+  lon        Float
+  population Int
+  search     String
+
+  @@index([population])
+}

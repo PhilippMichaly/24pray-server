@@ -230,6 +230,20 @@ chmod +x /etc/cron.daily/24pray-backup'
 Restore: Dienst stoppen → Backup-Datei nach `/opt/24pray/data/24pray.db`
 kopieren → `systemctl start 24pray-api`.
 
+## 8b. Städte-Datenbank (Geocoding, W3.6)
+
+Orts-Autocomplete weltweit — GeoNames cities15000 (CC-BY 4.0) einmalig importieren
+(und nach GeoNames-Updates bei Bedarf erneut; der Import ersetzt die Tabelle):
+
+```bash
+curl -sL -o /tmp/cities15000.zip https://download.geonames.org/export/dump/cities15000.zip
+unzip -o /tmp/cities15000.zip -d /tmp
+$SSH 'cd /opt/24pray/api &&
+  DATABASE_URL=file:/opt/24pray/data/24pray.db npm run import:cities -- /tmp/cities15000.txt &&
+  chown pray:pray /opt/24pray/data/24pray.db'
+# Test: curl "https://<domain>/api/geocode?q=griesheim"
+```
+
 ## 9. Domain + HTTPS
 
 **DNS (beim Registrar, hier Strato → Domains → DNS-Verwaltung):**

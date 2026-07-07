@@ -204,6 +204,11 @@ describe('W3.4 — Geo-Standorte', () => {
     expect(Math.abs(koeln!.links[0].lat - -1.29)).toBeLessThan(0.01);
     expect(koeln!.links[0].active).toBe(true); // läuft JETZT
     expect(JSON.stringify(stats.json())).not.toContain('Grace'); // Privacy
+    // W3.7: PUBLIC-Kette gibt sich zu erkennen (Fokus-Flug), PRIVATE nicht
+    expect((koeln as { title?: string }).title).toBe('Netz');
+    const berlinPrivat = (stats.json().points as { lat: number; title?: string }[])
+      .find((p) => Math.abs(p.lat - 52.52) < 0.01);
+    expect(berlinPrivat?.title).toBeUndefined();
   });
 });
 
@@ -238,6 +243,26 @@ describe('W3.5-Fix — Ort nachträglich + geplante Ketten leuchten', () => {
     const stats = await app.inject({ method: 'GET', url: '/stats/public' });
     const pts = stats.json().points as { lat: number }[];
     expect(pts.some((p) => Math.abs(p.lat - 50.87) < 0.01)).toBe(true);
+  });
+});
+
+describe('W3.6 — Geocoding', () => {
+  it('/geocode findet Städte über alle Sprachvarianten, sortiert nach Größe', async () => {
+    await db.prisma.city.createMany({
+      data: [
+        { id: 1, name: 'Munich', country: 'DE', lat: 48.14, lon: 11.58, population: 1_500_000, search: 'munich,munchen,münchen,muenchen' },
+        { id: 2, name: 'Münster', country: 'DE', lat: 51.96, lon: 7.63, population: 300_000, search: 'munster,münster,muenster' },
+        { id: 3, name: 'Siegen', country: 'DE', lat: 50.87, lon: 8.02, population: 107_000, search: 'siegen,zigen' },
+      ],
+    });
+    // deutscher Name findet den englischen Eintrag
+    const r1 = await app.inject({ method: 'GET', url: '/geocode?q=m%C3%BCnchen' });
+    expect(r1.json()[0].name).toBe('Munich');
+    // Präfix + Populations-Sortierung
+    const r2 = await app.inject({ method: 'GET', url: '/geocode?q=m%C3%BCn' });
+    expect(r2.json().map((c: { name: string }) => c.name)).toEqual(['Munich', 'Münster']);
+    // zu kurz → leer
+    expect((await app.inject({ method: 'GET', url: '/geocode?q=m' })).json()).toEqual([]);
   });
 });
 
