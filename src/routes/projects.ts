@@ -4,6 +4,7 @@ import { generateToken } from '../lib/tokens.js';
 import { requireUser } from '../plugins/auth.js';
 import { CreateProjectBody, UpdateProjectBody } from '../schemas/projects.js';
 import { toProjectWithStats } from '../lib/projectView.js';
+import { canReadProject, ensureMembership } from '../lib/access.js';
 
 function httpError(status: number, message: string) {
   const e = new Error(message) as Error & { statusCode?: number };
@@ -49,15 +50,17 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
       },
       include: { organizer: true },
     });
+    await ensureMembership(prisma, user.id, project.id, 'ORGANIZER'); // W3.2
     return toProjectWithStats(prisma, project, user.id);
   });
 
-  // Get one
+  // Get one (PRIVATE: Organizer, Mitglied oder ?invite=<token> — W3-Gap-Fix)
   app.get('/projects/:id', async (req) => {
     const { id } = req.params as { id: string };
+    const { invite } = (req.query ?? {}) as { invite?: string };
     const project = await prisma.prayerProject.findUnique({ where: { id }, include: { organizer: true } });
     if (!project) throw httpError(404, 'Projekt nicht gefunden');
-    if (project.visibility === 'PRIVATE' && req.user?.id !== project.organizerId) {
+    if (!(await canReadProject(prisma, project, req.user, invite))) {
       throw httpError(403, 'Kein Zugriff auf dieses Projekt');
     }
     return toProjectWithStats(prisma, project, req.user?.id);

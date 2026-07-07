@@ -10,6 +10,7 @@ import { registerAuth } from './plugins/auth.js';
 import { authRoutes } from './routes/auth.js';
 import { projectRoutes } from './routes/projects.js';
 import { slotRoutes } from './routes/slots.js';
+import { communityRoutes } from './routes/community.js';
 
 export interface BuildAppDeps {
   prisma: PrismaClient;
@@ -42,6 +43,7 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   authRoutes(app, { prisma, mailer, env });
   projectRoutes(app, { prisma });
   slotRoutes(app, { prisma });
+  communityRoutes(app, { prisma });
 
   return app;
 }

@@ -18,6 +18,10 @@ model User {
   slots          PrayerSlot[]
   magicTokens    MagicToken[]
   sessions       Session[]
+  memberships    Membership[]
+  recurring      RecurringCommitment[]
+  requests       PrayerRequest[]
+  reminderPref   ReminderPreference?
 }
 
 model PrayerProject {
@@ -35,6 +39,9 @@ model PrayerProject {
   organizer   User         @relation("OrganizerProjects", fields: [organizerId], references: [id])
   createdAt   DateTime     @default(now())
   slots       PrayerSlot[]
+  memberships Membership[]
+  recurring   RecurringCommitment[]
+  requests    PrayerRequest[]
 }
 
 model PrayerSlot {
@@ -50,8 +57,57 @@ model PrayerSlot {
   guestEmail    String?
   guestToken    String?       @unique // Secret für Gast-Selbst-Storno (§6.3)
   notifyChannel String        @default("EMAIL") // EMAIL | TELEGRAM
+  remindedAt    DateTime?     // Reminder-Job: wann die Erinnerung rausging (W3.2)
+  recurringId   String?
+  recurring     RecurringCommitment? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
 
   @@index([projectId, startTime])
+  @@index([status, startTime]) // Reminder-/Completion-Job-Scans
+}
+
+// ── Welle 3 (W3.2) ─────────────────────────────
+
+model Membership {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  projectId String
+  project   PrayerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role      String        @default("MEMBER") // MEMBER | ORGANIZER
+  createdAt DateTime      @default(now())
+
+  @@unique([userId, projectId])
+}
+
+model RecurringCommitment {
+  id        String        @id @default(cuid())
+  projectId String
+  project   PrayerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  createdAt DateTime      @default(now())
+  slots     PrayerSlot[]
+}
+
+model PrayerRequest {
+  id         String        @id @default(cuid())
+  projectId  String
+  project    PrayerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId   String?
+  author     User?         @relation(fields: [authorId], references: [id])
+  authorName String
+  text       String
+  createdAt  DateTime      @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+model ReminderPreference {
+  id            String @id @default(cuid())
+  userId        String @unique
+  user          User   @relation(fields: [userId], references: [id])
+  channel       String @default("EMAIL") // EMAIL | TELEGRAM (Modell vorhanden, Versand: EMAIL)
+  minutesBefore Int    @default(60)
 }
 
 model MagicToken {

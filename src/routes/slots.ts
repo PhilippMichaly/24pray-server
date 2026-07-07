@@ -2,8 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { generateToken } from '../lib/tokens.js';
+import { requireUser } from '../plugins/auth.js';
 import { BookSlotBody } from '../schemas/slots.js';
 import { buildSlotGrid, slotLengthMs, type BookedSlotInput } from '../lib/slotGrid.js';
+import { canReadProject, ensureMembership } from '../lib/access.js';
 
 function httpError(status: number, message: string) {
   const e = new Error(message) as Error & { statusCode?: number };
@@ -12,20 +14,23 @@ function httpError(status: number, message: string) {
 }
 
 const CancelQuery = z.object({ guestToken: z.string().optional() });
+const InviteQuery = z.object({ invite: z.string().optional() });
 
 export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient }) {
   const { prisma } = deps;
 
-  // Grid for a project
+  // Grid for a project (PRIVATE: Organizer, Mitglied oder ?invite=<token> — W3-Gap-Fix)
   app.get('/projects/:id/slots', async (req) => {
     const { id } = req.params as { id: string };
+    const { invite } = InviteQuery.parse(req.query);
     const project = await prisma.prayerProject.findUnique({ where: { id } });
     if (!project) throw httpError(404, 'Projekt nicht gefunden');
-    if (project.visibility === 'PRIVATE' && req.user?.id !== project.organizerId) {
+    if (!(await canReadProject(prisma, project, req.user, invite))) {
       throw httpError(403, 'Kein Zugriff');
     }
     const slots = await prisma.prayerSlot.findMany({
-      where: { projectId: id, status: 'BOOKED' },
+      // COMPLETED zählt weiter als „gehalten" im Grid (vergangene Kettenglieder)
+      where: { projectId: id, status: { in: ['BOOKED', 'COMPLETED'] } },
       include: { user: true },
     });
     const booked: BookedSlotInput[] = slots.map((s) => ({
@@ -61,9 +66,9 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient })
     const userId = req.user?.id ?? null;
     if (!userId && !body.guestName) throw httpError(400, 'Name erforderlich für Gastbuchung');
 
-    return prisma.$transaction(async (tx) => {
+    const slot = await prisma.$transaction(async (tx) => {
       const existing = await tx.prayerSlot.findFirst({
-        where: { projectId: id, startTime, status: 'BOOKED' },
+        where: { projectId: id, startTime, status: { in: ['BOOKED', 'COMPLETED'] } },
       });
       if (existing) throw httpError(409, 'Dieses Zeitfenster ist bereits belegt');
 
@@ -82,6 +87,54 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient })
         },
       });
     });
+    // Buchung macht eingeloggte User zu Mitgliedern (W3.2 Membership).
+    if (userId) await ensureMembership(prisma, userId, id);
+    return slot;
+  });
+
+  // W3.2: „Jede Woche übernehmen" — wöchentliche Wiederholung aus eigenem Slot materialisieren.
+  // Endliche Projekt-Laufzeit → alle Folgetermine werden als echte Slots angelegt (Grid-Merge trivial).
+  app.post('/slots/:id/recur', async (req) => {
+    const user = requireUser(req);
+    const { id } = req.params as { id: string };
+    const base = await prisma.prayerSlot.findUnique({ where: { id }, include: { project: true } });
+    if (!base) throw httpError(404, 'Slot nicht gefunden');
+    if (base.userId !== user.id) throw httpError(403, 'Nur der eigene Slot kann wiederholt werden');
+
+    const WEEK = 7 * 24 * 3600_000;
+    const slotMs = slotLengthMs(base.project.slotDurationMinutes);
+    const created: string[] = [];
+
+    const commitment = await prisma.recurringCommitment.create({
+      data: { projectId: base.projectId, userId: user.id, slots: { connect: { id: base.id } } },
+    });
+
+    for (let t = base.startTime.getTime() + WEEK; t + slotMs <= base.project.endDate.getTime(); t += WEEK) {
+      const startTime = new Date(t);
+      try {
+        const s = await prisma.$transaction(async (tx) => {
+          const clash = await tx.prayerSlot.findFirst({
+            where: { projectId: base.projectId, startTime, status: { in: ['BOOKED', 'COMPLETED'] } },
+          });
+          if (clash) return null; // belegte Folgewoche überspringen, nicht abbrechen
+          return tx.prayerSlot.create({
+            data: {
+              projectId: base.projectId,
+              userId: user.id,
+              startTime,
+              endTime: new Date(t + slotMs),
+              status: 'BOOKED',
+              notifyChannel: base.notifyChannel,
+              recurringId: commitment.id,
+            },
+          });
+        });
+        if (s) created.push(s.id);
+      } catch {
+        // Race mit paralleler Buchung → wie Clash behandeln (überspringen)
+      }
+    }
+    return { recurringId: commitment.id, createdSlotIds: created };
   });
 
   // Cancel a slot — booker, organizer (beide eingeloggt) ODER Gast per guestToken (§6.3)
