@@ -87,6 +87,9 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
         ...(body.startDate !== undefined ? { startDate: new Date(body.startDate) } : {}),
         ...(body.endDate !== undefined ? { endDate: new Date(body.endDate) } : {}),
         ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
+        ...(body.locationName !== undefined ? { locationName: body.locationName } : {}),
+        ...(body.locationLat !== undefined ? { locationLat: body.locationLat } : {}),
+        ...(body.locationLon !== undefined ? { locationLon: body.locationLon } : {}),
       },
       include: { organizer: true },
     });

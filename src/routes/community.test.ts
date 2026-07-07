@@ -207,6 +207,40 @@ describe('W3.4 — Geo-Standorte', () => {
   });
 });
 
+describe('W3.5-Fix — Ort nachträglich + geplante Ketten leuchten', () => {
+  it('PATCH setzt Ort (nur Organizer); GEPLANTE Kette erscheint in points', async () => {
+    const owner = await loginAs('w3-patchloc@example.com');
+    const now = Date.now();
+    // Kette startet erst MORGEN → zählt nicht als „brennt gerade", soll aber leuchten
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: {
+        title: 'Geplant', startDate: new Date(now + 24 * 3600_000).toISOString(),
+        endDate: new Date(now + 48 * 3600_000).toISOString(), visibility: 'PRIVATE',
+      },
+    });
+    const id = res.json().id;
+    // Ort nachträglich setzen
+    const patch = await app.inject({
+      method: 'PATCH', url: `/projects/${id}`, cookies: { session: owner },
+      payload: { locationName: 'Siegen', locationLat: 50.87, locationLon: 8.02 },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(patch.json().locationName).toBe('Siegen');
+    // Fremder darf nicht patchen
+    const mallory = await loginAs('w3-mallory-loc@example.com');
+    const forbidden = await app.inject({
+      method: 'PATCH', url: `/projects/${id}`, cookies: { session: mallory },
+      payload: { locationName: 'Berlin', locationLat: 52.5, locationLon: 13.4 },
+    });
+    expect(forbidden.statusCode).toBe(403);
+    // Geplante Kette leuchtet in points (auch wenn activeChains sie nicht zählt)
+    const stats = await app.inject({ method: 'GET', url: '/stats/public' });
+    const pts = stats.json().points as { lat: number }[];
+    expect(pts.some((p) => Math.abs(p.lat - 50.87) < 0.01)).toBe(true);
+  });
+});
+
 describe('W3 — Recurring', () => {
   it('„Jede Woche" materialisiert Folgewochen bis Projektende', async () => {
     const owner = await loginAs('w3-recur@example.com');

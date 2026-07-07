@@ -100,7 +100,14 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
       // Nerven-Netz (W3.5): aktive Ketten mit Standort + verortete Beter-Slots.
       // NUR Koordinaten — nie Namen/Titel; auch PRIVATE-Ketten bleiben anonym.
       prisma.prayerProject.findMany({
-        where: { ...activeWhere, locationLat: { not: null }, locationLon: { not: null } },
+        // Punkt auf dem Globus: laufende UND geplante Ketten (Hoffnung leuchtet schon vorher);
+        // das active-Flag der Links bleibt „betet in diesem Moment".
+        where: {
+          status: 'ACTIVE',
+          endDate: { gte: now },
+          locationLat: { not: null },
+          locationLon: { not: null },
+        },
         select: {
           locationLat: true,
           locationLon: true,

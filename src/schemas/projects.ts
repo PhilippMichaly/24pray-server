@@ -19,6 +19,9 @@ export const CreateProjectBody = z.object({
 
 export const UpdateProjectBody = z.object({
   title: z.string().min(1).optional(),
+  locationName: z.string().min(1).max(120).nullable().optional(),
+  locationLat: z.number().min(-90).max(90).nullable().optional(),
+  locationLon: z.number().min(-180).max(180).nullable().optional(),
   description: z.string().nullable().optional(),
   status: ProjectStatus.optional(),
   visibility: ProjectVisibility.optional(),
