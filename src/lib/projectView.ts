@@ -10,6 +10,7 @@ export interface ProjectWithStats {
   endDate: string;
   timezone: string;
   slotDurationMinutes: number;
+  locationName: string | null;
   inviteToken: string;
   organizerId: string;
   createdAt: string;
@@ -45,6 +46,7 @@ export async function toProjectWithStats(
     endDate: project.endDate.toISOString(),
     timezone: project.timezone,
     slotDurationMinutes: project.slotDurationMinutes,
+    locationName: project.locationName,
     inviteToken: project.organizerId === requesterId ? project.inviteToken : '',
     organizerId: project.organizerId,
     createdAt: project.createdAt.toISOString(),

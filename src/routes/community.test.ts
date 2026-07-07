@@ -149,6 +149,30 @@ function app0Mailer() {
   };
 }
 
+describe('W3.4 — Geo-Standorte', () => {
+  it('Projekt mit Standort taucht in /stats/public points auf (nur Koordinaten)', async () => {
+    const owner = await loginAs('w3-geo@example.com');
+    const now = Date.now();
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: {
+        title: 'Geo', startDate: new Date(now - 3600_000).toISOString(),
+        endDate: new Date(now + 24 * 3600_000).toISOString(), visibility: 'PRIVATE',
+        locationName: 'Berlin', locationLat: 52.52, locationLon: 13.4,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().locationName).toBe('Berlin');
+
+    const stats = await app.inject({ method: 'GET', url: '/stats/public' });
+    const pts = stats.json().points as { lat: number; lon: number }[];
+    expect(pts.some((p) => Math.abs(p.lat - 52.52) < 0.01 && Math.abs(p.lon - 13.4) < 0.01)).toBe(true);
+    // Kein Titel/Name im Public-Feed
+    expect(JSON.stringify(stats.json())).not.toContain('Geo');
+    expect(JSON.stringify(stats.json())).not.toContain('Berlin');
+  });
+});
+
 describe('W3 — Recurring', () => {
   it('„Jede Woche" materialisiert Folgewochen bis Projektende', async () => {
     const owner = await loginAs('w3-recur@example.com');

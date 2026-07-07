@@ -93,13 +93,23 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
 
   app.get('/stats/public', async () => {
     const now = new Date();
-    const [activeChains, heldSlots] = await Promise.all([
-      prisma.prayerProject.count({
-        where: { status: 'ACTIVE', startDate: { lte: now }, endDate: { gte: now } },
-      }),
+    const activeWhere = { status: 'ACTIVE', startDate: { lte: now }, endDate: { gte: now } };
+    const [activeChains, heldSlots, located] = await Promise.all([
+      prisma.prayerProject.count({ where: activeWhere }),
       prisma.prayerSlot.count({ where: { status: { in: ['BOOKED', 'COMPLETED'] } } }),
+      // Echte Globus-Punkte: aktive Ketten mit freiwilligem Standort (nur Koordinaten,
+      // kein Name/Titel — auch PRIVATE-Ketten bleiben so anonym).
+      prisma.prayerProject.findMany({
+        where: { ...activeWhere, locationLat: { not: null }, locationLon: { not: null } },
+        select: { locationLat: true, locationLon: true },
+        take: 60,
+      }),
     ]);
-    return { activeChains, heldSlots };
+    return {
+      activeChains,
+      heldSlots,
+      points: located.map((p) => ({ lat: p.locationLat, lon: p.locationLon })),
+    };
   });
 
   // ── Reminder-Preference (W3.2) ──────────────────────────

@@ -11,6 +11,10 @@ export const CreateProjectBody = z.object({
   timezone: z.string().min(1).default('Europe/Berlin'),
   slotDurationMinutes: z.number().int().positive().max(1440).default(60),
   visibility: ProjectVisibility.default('PRIVATE'),
+  // Optionaler Standort (W3.4): alle drei zusammen oder gar nicht
+  locationName: z.string().min(1).max(120).optional(),
+  locationLat: z.number().min(-90).max(90).optional(),
+  locationLon: z.number().min(-180).max(180).optional(),
 });
 
 export const UpdateProjectBody = z.object({
