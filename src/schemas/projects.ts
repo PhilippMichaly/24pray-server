@@ -13,7 +13,8 @@ export const CreateProjectBody = z.object({
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
   timezone: z.string().min(1).default('Europe/Berlin'),
-  slotDurationMinutes: z.number().int().positive().max(1440).default(60),
+  // Wählbare Aufteilung der Wache: Stunden (60) oder ganze Tage (1440) — kein Zwischenwert (24pray Tages-Wachen).
+  slotDurationMinutes: z.union([z.literal(60), z.literal(1440)]).default(60),
   visibility: ProjectVisibility.default('PRIVATE'),
   maskNames: z.boolean().default(false),
   notifyOnBooking: z.boolean().default(true),

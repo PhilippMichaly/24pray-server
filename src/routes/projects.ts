@@ -159,7 +159,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
     const body = ShiftProjectBody.parse(req.body);
     const project = await prisma.prayerProject.findUnique({ where: { id } });
     if (!project) throw httpError(404, 'Projekt nicht gefunden');
-    if (project.organizerId !== user.id) throw httpError(403, 'Nur der Organisator darf die Wache verschieben');
+    if (project.organizerId !== user.id) throw httpError(403, 'Nur der Organisator darf die Gebetswache verschieben');
 
     const newStart = new Date(body.newStartDate);
     const deltaMs = newStart.getTime() - project.startDate.getTime();
@@ -211,7 +211,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
     const { id } = req.params as { id: string };
     const project = await prisma.prayerProject.findUnique({ where: { id } });
     if (!project) throw httpError(404, 'Projekt nicht gefunden');
-    if (project.organizerId !== user.id) throw httpError(403, 'Nur der Organisator darf die Wache löschen');
+    if (project.organizerId !== user.id) throw httpError(403, 'Nur der Organisator darf die Gebetswache löschen');
 
     const recipients = await collectFutureBookedRecipients(prisma, id, new Date());
 

@@ -366,6 +366,33 @@ describe('W3 — Recurring', () => {
     expect(recur.statusCode).toBe(200);
     expect(recur.json().createdSlotIds).toHaveLength(2); // +7d, +14d
   });
+
+  it('„Jede Woche" funktioniert auch für Tages-Wachen (slotDurationMinutes=1440)', async () => {
+    const owner = await loginAs('w3-recur-day@example.com');
+    // 5 Wochen lange Tages-Wache → Basis-Tag + 4 Folgewochen (jeweils +7 Tage, Slot-Länge=1 Tag)
+    const start = Date.UTC(2026, 5, 20, 14, 0, 0);
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: {
+        title: 'Recur-Day', startDate: new Date(start).toISOString(),
+        endDate: new Date(start + 35 * 24 * HOUR).toISOString(), visibility: 'PUBLIC',
+        slotDurationMinutes: 1440,
+      },
+    });
+    const id = res.json().id;
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${id}/slots`, cookies: { session: owner },
+      payload: { startTime: new Date(start).toISOString() },
+    });
+    const slotId = book.json().id;
+    const recur = await app.inject({ method: 'POST', url: `/slots/${slotId}/recur`, cookies: { session: owner } });
+    expect(recur.statusCode).toBe(200);
+    expect(recur.json().createdSlotIds).toHaveLength(4); // +7d, +14d, +21d, +28d
+
+    const grid = await app.inject({ method: 'GET', url: `/projects/${id}/slots`, cookies: { session: owner } });
+    const mySlots = grid.json().filter((s: { isMine: boolean }) => s.isMine);
+    expect(mySlots).toHaveLength(5); // Basis + 4 Folgewochen, jede weiterhin ein ganzer Tag
+  });
 });
 
 describe('Lasttest-Fix: /stats/public TTL-Cache', () => {

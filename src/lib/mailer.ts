@@ -7,6 +7,7 @@ export interface ReminderMail {
   timezone: string;
   icsUrl?: string; // Kalendereintrag (.ics)
   googleUrl?: string; // Google-Calendar-Link
+  isAllDay?: boolean; // Tages-Wache (slotDurationMinutes=1440): Datum statt Uhrzeit anzeigen
 }
 
 export interface BookingMail {
@@ -16,6 +17,7 @@ export interface BookingMail {
   timezone: string;
   icsUrl: string;
   googleUrl: string;
+  isAllDay?: boolean;
 }
 
 /** Owner-Benachrichtigung bei neuer Buchung in der eigenen Kette (Punkt 10). */
@@ -25,6 +27,7 @@ export interface BookingNoticeMail {
   startTime: string; // ISO
   endTime: string; // ISO
   timezone: string;
+  isAllDay?: boolean;
 }
 
 /** Eine verschobene Stunde für die Zeitplan-Änderungs-Mail. */
@@ -61,7 +64,16 @@ export interface Mailer {
   sendProjectFarewell?(email: string, farewell: ProjectFarewellMail): Promise<void>;
 }
 
-function formatReminderTime(r: { startTime: string; timezone: string }): string {
+function formatReminderTime(r: { startTime: string; timezone: string; isAllDay?: boolean }): string {
+  if (r.isAllDay) {
+    // Tages-Wache: kein Uhrzeit-Punkt, sondern das Datum des Tages („Montag, 14. Juli").
+    return new Intl.DateTimeFormat('de-DE', {
+      timeZone: r.timezone,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    }).format(new Date(r.startTime));
+  }
   return new Intl.DateTimeFormat('de-DE', {
     timeZone: r.timezone,
     weekday: 'long',
@@ -150,7 +162,7 @@ export function createMailer(config: MailerConfig): Mailer {
       await transport.sendMail({
         from: config.from,
         to: email,
-        subject: `24pray — neue Stunde in deiner Wache (${n.projectTitle})`,
+        subject: `24pray — neue Stunde in deiner Gebetswache (${n.projectTitle})`,
         text: `${n.bookerName} hat eine Stunde in „${n.projectTitle}" übernommen: ${when} (${n.timezone}).`,
         html: `<p><strong>${n.bookerName}</strong> hat eine Stunde in „<strong>${n.projectTitle}</strong>" übernommen: <strong>${when}</strong> (${n.timezone}).</p>`,
       });
@@ -168,8 +180,8 @@ export function createMailer(config: MailerConfig): Mailer {
         from: config.from,
         to: email,
         subject: `24pray — Zeitplan geändert (${c.projectTitle})`,
-        text: `${c.name ? c.name + ', ' : ''}die Gebetswache „${c.projectTitle}" wurde verschoben: ${oldWhen} → ${newWhen} (${c.timezone}).\n\nDeine Stunden:\n${hoursText}\n\nPasst es nicht mehr? Gib deine Stunde in der Wache frei: ${c.projectUrl}`,
-        html: `<p>${c.name ? c.name + ', ' : ''}die Gebetswache „<strong>${c.projectTitle}</strong>" wurde verschoben: ${oldWhen} → <strong>${newWhen}</strong> (${c.timezone}).</p><p>Deine Stunden:</p><ul>${hoursHtml}</ul><p>Passt es nicht mehr? <a href="${c.projectUrl}">Gib deine Stunde in der Wache frei</a>.</p>`,
+        text: `${c.name ? c.name + ', ' : ''}die Gebetswache „${c.projectTitle}" wurde verschoben: ${oldWhen} → ${newWhen} (${c.timezone}).\n\nDeine Stunden:\n${hoursText}\n\nPasst es nicht mehr? Gib deine Stunde in der Gebetswache frei: ${c.projectUrl}`,
+        html: `<p>${c.name ? c.name + ', ' : ''}die Gebetswache „<strong>${c.projectTitle}</strong>" wurde verschoben: ${oldWhen} → <strong>${newWhen}</strong> (${c.timezone}).</p><p>Deine Stunden:</p><ul>${hoursHtml}</ul><p>Passt es nicht mehr? <a href="${c.projectUrl}">Gib deine Stunde in der Gebetswache frei</a>.</p>`,
       });
     },
     async sendProjectFarewell(email, f) {

@@ -63,6 +63,28 @@ describe('projects', () => {
     expect(direct.statusCode).toBe(403);
   });
 
+  it('slotDurationMinutes: nur 60 (Stunden) oder 1440 (Tage) sind gültig — jeder Zwischenwert -> 400', async () => {
+    const finn = await loginAs('finn-duration@example.com');
+    const invalid61 = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: finn },
+      payload: { title: 'Ungültig 61', startDate: future(1), endDate: future(4), slotDurationMinutes: 61 },
+    });
+    expect(invalid61.statusCode).toBe(400);
+    const invalid1441 = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: finn },
+      payload: { title: 'Ungültig 1441', startDate: future(1), endDate: future(200), slotDurationMinutes: 1441 },
+    });
+    expect(invalid1441.statusCode).toBe(400);
+
+    const validDay = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: finn },
+      payload: { title: 'Tages-Wache', startDate: future(24), endDate: future(24 + 7 * 24), slotDurationMinutes: 1440 },
+    });
+    expect(validDay.statusCode).toBe(200);
+    expect(validDay.json().slotDurationMinutes).toBe(1440);
+    expect(validDay.json().totalSlots).toBe(7); // 7 Tage / 1440 Min je Slot
+  });
+
   it('Liste liefert korrekte bookedSlots pro Projekt (inkl. 0) — Netz für den N+1-Fix', async () => {
     const dora = await loginAs('dora@example.com');
     const mk = async (title: string) => (await app.inject({

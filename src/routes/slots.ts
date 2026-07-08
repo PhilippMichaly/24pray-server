@@ -22,12 +22,18 @@ const InviteQuery = z.object({ invite: z.string().optional() });
 export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env }) {
   const { prisma, mailer, env } = deps;
 
-  const slotEvent = (slot: { id: string; startTime: Date; endTime: Date; projectId: string }, title: string): CalendarEvent => ({
+  const slotEvent = (
+    slot: { id: string; startTime: Date; endTime: Date; projectId: string },
+    title: string,
+    project: { slotDurationMinutes: number; timezone: string },
+  ): CalendarEvent => ({
     uid: slot.id,
     title: `Gebetsstunde — ${title}`,
     startTime: slot.startTime,
     endTime: slot.endTime,
     url: env ? `${env.APP_URL}/projects/${slot.projectId}` : undefined,
+    allDay: project.slotDurationMinutes === 1440,
+    timezone: project.timezone,
   });
 
   // Grid for a project (PRIVATE: Organizer, Mitglied oder ?invite=<token> — W3-Gap-Fix)
@@ -109,7 +115,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
 
     // Gast mit E-Mail: Bestätigung mit Kalender-Links (Fehler dürfen die Buchung nie kippen).
     if (!userId && slot.guestEmail && mailer?.sendBookingConfirmation && env) {
-      const ev = slotEvent(slot, project.title);
+      const ev = slotEvent(slot, project.title, project);
       mailer.sendBookingConfirmation(slot.guestEmail, {
         name: slot.guestName ?? '',
         projectTitle: project.title,
@@ -117,6 +123,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         timezone: project.timezone,
         icsUrl: `${env.APP_URL}/api/slots/${slot.id}/ics`,
         googleUrl: googleCalendarUrl(ev),
+        isAllDay: project.slotDurationMinutes === 1440,
       }).catch((err) => console.error(`[mail] booking confirmation failed for slot ${slot.id}:`, err));
     }
 
@@ -130,6 +137,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         startTime: slot.startTime.toISOString(),
         endTime: slot.endTime.toISOString(),
         timezone: project.timezone,
+        isAllDay: project.slotDurationMinutes === 1440,
       }).catch((err) => console.error(`[mail] booking notice failed for slot ${slot.id}:`, err));
     }
     return slot;
@@ -143,7 +151,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     reply
       .header('content-type', 'text/calendar; charset=utf-8')
       .header('content-disposition', 'attachment; filename="24pray-gebetsstunde.ics"');
-    return buildIcs(slotEvent(slot, slot.project.title));
+    return buildIcs(slotEvent(slot, slot.project.title, slot.project));
   });
 
   // W3.2: „Jede Woche übernehmen" — wöchentliche Wiederholung aus eigenem Slot materialisieren.

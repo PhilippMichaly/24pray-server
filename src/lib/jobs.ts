@@ -43,18 +43,22 @@ export async function sendDueReminders(
     const name = slot.user?.name ?? slot.guestName ?? '';
 
     try {
+      const isAllDay = slot.project.slotDurationMinutes === 1440;
       const ev = {
         uid: slot.id,
         title: `Gebetsstunde — ${slot.project.title}`,
         startTime: slot.startTime,
         endTime: slot.endTime,
         url: appUrl ? `${appUrl}/projects/${slot.projectId}` : undefined,
+        allDay: isAllDay,
+        timezone: slot.project.timezone,
       };
       await mailer.sendReminder?.(email, {
         name,
         projectTitle: slot.project.title,
         startTime: slot.startTime.toISOString(),
         timezone: slot.project.timezone,
+        isAllDay,
         ...(appUrl ? { icsUrl: `${appUrl}/api/slots/${slot.id}/ics`, googleUrl: googleCalendarUrl(ev) } : {}),
       });
       await prisma.prayerSlot.update({ where: { id: slot.id }, data: { remindedAt: now } });

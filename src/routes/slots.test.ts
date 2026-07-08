@@ -149,6 +149,31 @@ describe('slots', () => {
     expect(await app.inject({ method: 'GET', url: '/slots/gibtsnicht/ics' }).then((r) => r.statusCode)).toBe(404);
   });
 
+  it('Tages-Wache (slotDurationMinutes=1440): ICS ist ein Ganztagestermin', async () => {
+    const u = await loginAs('ics-day@example.com');
+    const dayStart = new Date(Date.UTC(2026, 6, 14, 12, 0, 0)).toISOString(); // 14:00 Berlin
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: u },
+      payload: {
+        title: 'Tages-ICS', startDate: dayStart,
+        endDate: new Date(Date.UTC(2026, 6, 14 + 7, 12, 0, 0)).toISOString(),
+        visibility: 'PUBLIC', timezone: 'Europe/Berlin', slotDurationMinutes: 1440,
+      },
+    });
+    const pid = create.json().id as string;
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: u },
+      payload: { startTime: dayStart },
+    });
+    expect(book.statusCode).toBe(200);
+    const slotId = book.json().id;
+
+    const ics = await app.inject({ method: 'GET', url: `/slots/${slotId}/ics` });
+    expect(ics.statusCode).toBe(200);
+    expect(ics.body).toContain('DTSTART;VALUE=DATE:20260714');
+    expect(ics.body).toContain('DTEND;VALUE=DATE:20260715');
+  });
+
   it('Gast-Buchung mit E-Mail verschickt Bestätigung mit Kalender-Links', async () => {
     const u = await loginAs('conf-orga@example.com');
     const pid = await makeProject(u);
