@@ -161,25 +161,51 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
 
   // ── Geocoding (W3.6, GeoNames cities500) ────────────────
 
+  // Diakritik-/Case-insensitiver Normalname für den Exakt-Match-Vergleich (Rang 0).
+  // Deckt sich bewusst NICHT mit Transliterationen ("ue" statt "ü") — das übernimmt
+  // schon der `search`-Blob mit seinen expliziten Sprachvarianten.
+  function normalizeName(s: string): string {
+    return s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  }
+
   app.get('/geocode', {
     config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
   }, async (req) => {
     const { q } = (req.query ?? {}) as { q?: string };
     const term = (q ?? '').trim().toLowerCase();
     if (term.length < 2) return [];
-    const raw = await prisma.city.findMany({
-      where: { search: { contains: term } },
-      orderBy: { population: 'desc' },
-      take: 30,
-      select: { name: true, country: true, lat: true, lon: true, search: true, population: true },
-    });
-    // Ranking: Wortanfang (Name ODER irgendeine Sprachvariante) > Substring; bei Gleichstand
-    // (z.B. cities500-Kollisionen wie "München" vs. "Münchenroda", beide Wortanfang) explizit
-    // nach Einwohnerzahl absteigend — nicht auf DB-orderBy + Sort-Stabilität allein verlassen.
-    const rank = (c: { name: string; search: string }) =>
-      c.name.toLowerCase().startsWith(term) || c.search.startsWith(term) || c.search.includes(`,${term}`)
-        ? 0
-        : 1;
+    // Präfix-Query über den FTS5-Index (city_fts, external-content auf City, siehe
+    // Migration 20260708140000_add_city_fts_search) statt LIKE %term% + Populations-Scan —
+    // löst seltene Namen (z.B. "petershausen") in <1ms statt ~220ms auf, weil SQLite nur
+    // im invertierten Index sucht statt der Population-Reihenfolge nach Treffern zu jagen.
+    // Ganze Phrase in Anführungszeichen (innere Quotes verdoppelt escaped) + `*`
+    // = Präfix-Match auf das letzte Token einer Phrase — verhindert außerdem, dass
+    // FTS5-Operatoren (AND/OR/NOT/^/-) aus Nutzereingaben interpretiert werden.
+    const ftsQuery = `"${term.replace(/"/g, '""')}"*`;
+    const raw = await prisma.$queryRaw<
+      { name: string; country: string; lat: number; lon: number; population: number; search: string }[]
+    >`
+      SELECT c."name" as name, c."country" as country, c."lat" as lat, c."lon" as lon, c."population" as population, c."search" as search
+      FROM "City" c
+      JOIN (SELECT "rowid" FROM "city_fts" WHERE "city_fts" MATCH ${ftsQuery}) f ON f."rowid" = c."id"
+      ORDER BY c."population" DESC
+      LIMIT 200
+    `;
+    // Ranking: exakter Normalname-Match > Wortanfang (Name ODER irgendeine Sprachvariante
+    // im `search`-Blob) > Rest; bei Gleichstand (z.B. cities500-Kollisionen wie "München"
+    // vs. "Münchenroda", oder "Petershausen" vs. "Petershausen-West/-Ost") explizit nach
+    // Einwohnerzahl absteigend — nicht auf DB-orderBy + Sort-Stabilität allein verlassen.
+    const normTerm = normalizeName(term);
+    const rank = (c: { name: string; search: string }) => {
+      if (normalizeName(c.name) === normTerm) return 0; // exakter Treffer gewinnt IMMER
+      if (c.name.toLowerCase().startsWith(term) || c.search.startsWith(term) || c.search.includes(`,${term}`)) {
+        return 1; // Wortanfang (Name oder Sprachvariante)
+      }
+      return 2; // FTS liefert i.d.R. nur Präfix-Treffer, Rest ist ein Sicherheitsnetz
+    };
     return raw
       .sort((a, b) => rank(a) - rank(b) || b.population - a.population)
       .slice(0, 8)

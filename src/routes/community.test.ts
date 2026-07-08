@@ -310,6 +310,38 @@ describe('W3.6 — Geocoding', () => {
     const names = r.json().map((c: { name: string }) => c.name);
     expect(names).toContain('Petershausen');
   });
+
+  it('Exakt-Boost: "Petershausen" (Dorf, Bayern) schlägt "Petershausen-West/-Ost" (Konstanzer Stadtteile, mehr EW)', async () => {
+    // Vorher: reines Populations-Ranking hätte die einwohnerstärkeren Konstanzer
+    // Stadtteile vor den exakt passenden Bayern-Ort gestellt. Ein exakter
+    // Normalname-Match (case-/diakritik-insensitiv) muss IMMER zuerst kommen,
+    // egal wie klein der Ort ist — danach zählt erst die Population.
+    await db.prisma.city.deleteMany();
+    await db.prisma.city.createMany({
+      data: [
+        { id: 201, name: 'Petershausen', country: 'DE', lat: 48.40967, lon: 11.47056, population: 5965, search: 'petershausen' },
+        { id: 202, name: 'Petershausen-West', country: 'DE', lat: 47.6712, lon: 9.1543, population: 12000, search: 'petershausen-west' },
+        { id: 203, name: 'Petershausen-Ost', country: 'DE', lat: 47.6745, lon: 9.1789, population: 11000, search: 'petershausen-ost' },
+      ],
+    });
+    const r = await app.inject({ method: 'GET', url: '/geocode?q=petershausen' });
+    const names = r.json().map((c: { name: string }) => c.name);
+    expect(names[0]).toBe('Petershausen');
+    expect(names.slice(1)).toEqual(['Petershausen-West', 'Petershausen-Ost']);
+  });
+
+  it('FTS-Index bleibt nach Update/Delete synchron (Trigger city_fts_au/city_fts_ad)', async () => {
+    await db.prisma.city.deleteMany();
+    await db.prisma.city.create({
+      data: { id: 301, name: 'Testhausen', country: 'DE', lat: 1, lon: 1, population: 100, search: 'testhausen' },
+    });
+    await db.prisma.city.update({ where: { id: 301 }, data: { name: 'Testhausen-Neu', search: 'testhausenneu' } });
+    const afterUpdate = await app.inject({ method: 'GET', url: '/geocode?q=testhausen' });
+    expect(afterUpdate.json().map((c: { name: string }) => c.name)).toEqual(['Testhausen-Neu']);
+    await db.prisma.city.delete({ where: { id: 301 } });
+    const afterDelete = await app.inject({ method: 'GET', url: '/geocode?q=testhausen' });
+    expect(afterDelete.json()).toEqual([]);
+  });
 });
 
 describe('W3 — Recurring', () => {

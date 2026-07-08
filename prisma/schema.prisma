@@ -147,6 +147,9 @@ model Session {
 
 // GeoNames cities500 (CC-BY 4.0, geonames.org) — Geocoding für Ketten-/Beter-Orte (W3.6).
 // `search` = lowercase-Blob aus Name + ASCII + allen Sprachvarianten (München findet Munich).
+// Sidecar: virtuelle FTS5-Tabelle "city_fts" (Migration 20260708140000_add_city_fts_search)
+// für die Präfix-Suche in /geocode — nicht als Prisma-Model abbildbar, nur per $queryRaw
+// ansprechbar. Bleibt per SQLite-Trigger auf City (AFTER INSERT/UPDATE/DELETE) synchron.
 model City {
   id         Int    @id // geonameid
   name       String

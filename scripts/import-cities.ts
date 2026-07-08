@@ -55,8 +55,13 @@ async function main() {
       await tx.city.createMany({ data: rows.slice(i, i + CHUNK) });
     }
   }, { timeout: 120_000 });
+  // city_fts (FTS5-Präfix-Index für /geocode, Migration 20260708140000_add_city_fts_search)
+  // bleibt über Trigger auf City automatisch synchron — auch für deleteMany/createMany oben.
+  // Nach ~235k einzelnen Trigger-Inserts 'optimize' fahren: merged die vielen kleinen
+  // FTS-B-Tree-Segmente zu einem kompakten Index (hält Query-Latenz niedrig).
+  await prisma.$executeRawUnsafe(`INSERT INTO "city_fts"("city_fts") VALUES('optimize')`);
   const n = await prisma.city.count();
-  console.log(`Fertig: ${n} Städte in der City-Tabelle.`);
+  console.log(`Fertig: ${n} Städte in der City-Tabelle (FTS5-Index optimiert).`);
   await prisma.$disconnect();
 }
 
