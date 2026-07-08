@@ -21,7 +21,10 @@ const MINUTE_MS = 60 * 1000;
 export function maskName(n: string | null): string | null {
   if (!n) return n;
   const parts = n.trim().split(/\s+/).filter(Boolean);
-  if (parts.length <= 1) return parts[0] ?? n;
+  if (parts.length === 0) return n;
+  // Magic-Link-Accounts heißen wie ihr E-Mail-Prefix (ein Wort, oft volle Identität
+  // wie „max.mustermann") — Ein-Wort-Namen deshalb auf 2 Zeichen kürzen.
+  if (parts.length === 1) return `${parts[0].slice(0, 2)}…`;
   return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
 }
 

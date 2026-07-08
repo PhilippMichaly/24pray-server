@@ -64,7 +64,13 @@ describe('maskName', () => {
   it('Vorname + Initial', () => {
     expect(maskName('Ruth Klein')).toBe('Ruth K.');
     expect(maskName('Anna Maria Schmidt')).toBe('Anna S.');
-    expect(maskName('Cher')).toBe('Cher');
     expect(maskName(null)).toBe(null);
+  });
+
+  it('kürzt Ein-Wort-Namen (Magic-Link-Accounts heißen wie ihr E-Mail-Prefix)', () => {
+    expect(maskName('eut-organizer-1783498263413')).toBe('eu…');
+    expect(maskName('max.mustermann')).toBe('ma…');
+    expect(maskName('Cher')).toBe('Ch…');
+    expect(maskName('Al')).toBe('Al…');
   });
 });
