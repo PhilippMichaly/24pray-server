@@ -27,11 +27,38 @@ export interface BookingNoticeMail {
   timezone: string;
 }
 
+/** Eine verschobene Stunde für die Zeitplan-Änderungs-Mail. */
+export interface ScheduleChangeSlotItem {
+  oldStartTime: string; // ISO, vor der Verschiebung
+  newStartTime: string; // ISO, nach der Verschiebung
+}
+
+/** Wache verschoben (Ersteller-Lebenszyklus): alle künftigen Stunden einer Person in EINER Mail. */
+export interface ScheduleChangeMail {
+  name: string;
+  projectTitle: string;
+  oldStartDate: string; // ISO, alter Projekt-Start
+  newStartDate: string; // ISO, neuer Projekt-Start
+  timezone: string;
+  slots: ScheduleChangeSlotItem[];
+  projectUrl: string; // zum Freigeben, falls die neue Zeit nicht mehr passt
+}
+
+/** Wache gelöscht (Ersteller-Lebenszyklus): Abschieds-Mail an künftige Gebuchte. */
+export interface ProjectFarewellMail {
+  name: string;
+  projectTitle: string;
+  timezone: string;
+  slots: string[]; // ISO-Starts der betroffenen (nicht mehr stattfindenden) Stunden
+}
+
 export interface Mailer {
   sendMagicLink(email: string, url: string, code?: string): Promise<void>;
   sendReminder?(email: string, reminder: ReminderMail): Promise<void>;
   sendBookingConfirmation?(email: string, booking: BookingMail): Promise<void>;
   sendBookingNotice?(email: string, notice: BookingNoticeMail): Promise<void>;
+  sendScheduleChange?(email: string, change: ScheduleChangeMail): Promise<void>;
+  sendProjectFarewell?(email: string, farewell: ProjectFarewellMail): Promise<void>;
 }
 
 function formatReminderTime(r: { startTime: string; timezone: string }): string {
@@ -70,6 +97,12 @@ export function createMailer(config: MailerConfig): Mailer {
       },
       async sendBookingNotice(email, n) {
         console.log(`[mailer:dev] booking notice for ${email}: ${n.bookerName} @ ${n.projectTitle} (${formatReminderTime(n)})`);
+      },
+      async sendScheduleChange(email, c) {
+        console.log(`[mailer:dev] schedule change for ${email}: ${c.projectTitle} (${c.slots.length} slot(s))`);
+      },
+      async sendProjectFarewell(email, f) {
+        console.log(`[mailer:dev] project farewell for ${email}: ${f.projectTitle} (${f.slots.length} slot(s))`);
       },
     };
   }
@@ -120,6 +153,34 @@ export function createMailer(config: MailerConfig): Mailer {
         subject: `24pray — neue Stunde in deiner Wache (${n.projectTitle})`,
         text: `${n.bookerName} hat eine Stunde in „${n.projectTitle}" übernommen: ${when} (${n.timezone}).`,
         html: `<p><strong>${n.bookerName}</strong> hat eine Stunde in „<strong>${n.projectTitle}</strong>" übernommen: <strong>${when}</strong> (${n.timezone}).</p>`,
+      });
+    },
+    async sendScheduleChange(email, c) {
+      const oldWhen = formatReminderTime({ startTime: c.oldStartDate, timezone: c.timezone });
+      const newWhen = formatReminderTime({ startTime: c.newStartDate, timezone: c.timezone });
+      const rows = c.slots.map((s) => ({
+        oldWhen: formatReminderTime({ startTime: s.oldStartTime, timezone: c.timezone }),
+        newWhen: formatReminderTime({ startTime: s.newStartTime, timezone: c.timezone }),
+      }));
+      const hoursText = rows.map((r) => `  ${r.oldWhen} → ${r.newWhen}`).join('\n');
+      const hoursHtml = rows.map((r) => `<li>${r.oldWhen} → <strong>${r.newWhen}</strong></li>`).join('');
+      await transport.sendMail({
+        from: config.from,
+        to: email,
+        subject: `24pray — Zeitplan geändert (${c.projectTitle})`,
+        text: `${c.name ? c.name + ', ' : ''}die Gebetswache „${c.projectTitle}" wurde verschoben: ${oldWhen} → ${newWhen} (${c.timezone}).\n\nDeine Stunden:\n${hoursText}\n\nPasst es nicht mehr? Gib deine Stunde in der Wache frei: ${c.projectUrl}`,
+        html: `<p>${c.name ? c.name + ', ' : ''}die Gebetswache „<strong>${c.projectTitle}</strong>" wurde verschoben: ${oldWhen} → <strong>${newWhen}</strong> (${c.timezone}).</p><p>Deine Stunden:</p><ul>${hoursHtml}</ul><p>Passt es nicht mehr? <a href="${c.projectUrl}">Gib deine Stunde in der Wache frei</a>.</p>`,
+      });
+    },
+    async sendProjectFarewell(email, f) {
+      const list = f.slots.map((s) => formatReminderTime({ startTime: s, timezone: f.timezone })).join(', ');
+      const plural = f.slots.length > 1;
+      await transport.sendMail({
+        from: config.from,
+        to: email,
+        subject: `24pray — Gebetswache beendet (${f.projectTitle})`,
+        text: `Die Gebetswache „${f.projectTitle}" wurde beendet. Deine Stunde${plural ? `n am ${list} finden` : ` am ${list} findet`} nicht mehr statt. Danke fürs Mitwachen.`,
+        html: `<p>Die Gebetswache „<strong>${f.projectTitle}</strong>" wurde beendet. Deine Stunde${plural ? `n am <strong>${list}</strong> finden` : ` am <strong>${list}</strong> findet`} nicht mehr statt. Danke fürs Mitwachen.</p>`,
       });
     },
   };

@@ -49,7 +49,7 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   registerAuth(app, prisma);
   app.get('/health', async () => ({ ok: true }));
   authRoutes(app, { prisma, mailer, env });
-  projectRoutes(app, { prisma });
+  projectRoutes(app, { prisma, mailer, env });
   slotRoutes(app, { prisma, mailer, env });
   communityRoutes(app, { prisma, env });
   meRoutes(app, { prisma });

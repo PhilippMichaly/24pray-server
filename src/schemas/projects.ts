@@ -43,3 +43,8 @@ export const UpdateProjectBody = z.object({
   endDate: z.string().datetime().optional(),
   timezone: z.string().min(1).optional(),
 });
+
+/** Wache verschieben (Ersteller-Lebenszyklus): neuer Projekt-Start, Delta wandert auf alles. */
+export const ShiftProjectBody = z.object({
+  newStartDate: z.string().datetime(),
+});

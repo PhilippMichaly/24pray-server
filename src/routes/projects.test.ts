@@ -7,6 +7,8 @@ import { makeTestDb, type TestDb } from '../test/helpers.js';
 let db: TestDb;
 let app: FastifyInstance;
 const captured: { email: string; url: string }[] = [];
+const scheduleChanges: { email: string; m: import('../lib/mailer.js').ScheduleChangeMail }[] = [];
+const farewells: { email: string; m: import('../lib/mailer.js').ProjectFarewellMail }[] = [];
 
 let loginSeq = 0;
 async function loginAs(email: string): Promise<string> {
@@ -24,13 +26,18 @@ beforeAll(async () => {
   app = await buildApp({
     prisma: db.prisma,
     env: parseEnv({ APP_URL: 'http://localhost:3000' }),
-    mailer: { async sendMagicLink(email, url) { captured.push({ email, url }); } },
+    mailer: {
+      async sendMagicLink(email, url) { captured.push({ email, url }); },
+      async sendScheduleChange(email, m) { scheduleChanges.push({ email, m }); },
+      async sendProjectFarewell(email, m) { farewells.push({ email, m }); },
+    },
   });
   await app.ready();
 });
 afterAll(async () => { await app.close(); await db.cleanup(); });
 
 const future = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
+const DAY = 24 * 3600_000;
 
 describe('projects', () => {
   it('create -> appears in list with stats; private hidden from others', async () => {
@@ -210,5 +217,239 @@ describe('projects', () => {
 
     const bad = await app.inject({ method: 'GET', url: '/join/does-not-exist' });
     expect(bad.statusCode).toBe(404);
+  });
+});
+
+describe('wk-POST /projects/:id/shift — Wache verschieben (Ersteller-Lebenszyklus)', () => {
+  it('verschiebt Projekt- und ALLE Slot-Zeiten exakt um das Delta, auch CANCELLED/COMPLETED', async () => {
+    const orga = await loginAs('wk-shift-orga@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'wk-Shiftbar', startDate: future(0), endDate: future(240), visibility: 'PUBLIC' },
+    });
+    const pid = create.json().id;
+
+    const booked = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: orga },
+      payload: { startTime: future(2) },
+    });
+    const cancelled = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: orga },
+      payload: { startTime: future(3) },
+    });
+    await app.inject({ method: 'DELETE', url: `/slots/${cancelled.json().id}`, cookies: { session: orga } });
+    const completedBook = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: orga },
+      payload: { startTime: future(4) },
+    });
+    await db.prisma.prayerSlot.update({ where: { id: completedBook.json().id }, data: { status: 'COMPLETED' } });
+
+    const oldStart = new Date(create.json().startDate);
+    const deltaMs = 2 * DAY;
+    const newStart = new Date(oldStart.getTime() + deltaMs).toISOString();
+
+    const shift = await app.inject({
+      method: 'POST', url: `/projects/${pid}/shift`, cookies: { session: orga },
+      payload: { newStartDate: newStart },
+    });
+    expect(shift.statusCode).toBe(200);
+    expect(new Date(shift.json().startDate).getTime()).toBe(oldStart.getTime() + deltaMs);
+    expect(new Date(shift.json().endDate).getTime()).toBe(new Date(create.json().endDate).getTime() + deltaMs);
+
+    const bookedRow = await db.prisma.prayerSlot.findUnique({ where: { id: booked.json().id } });
+    expect(bookedRow!.startTime.getTime()).toBe(new Date(booked.json().startTime).getTime() + deltaMs);
+    expect(bookedRow!.endTime.getTime()).toBe(new Date(booked.json().endTime).getTime() + deltaMs);
+    expect(bookedRow!.status).toBe('BOOKED');
+
+    const cancelledRow = await db.prisma.prayerSlot.findUnique({ where: { id: cancelled.json().id } });
+    expect(cancelledRow!.status).toBe('CANCELLED');
+    expect(cancelledRow!.startTime.getTime()).toBe(new Date(cancelled.json().startTime).getTime() + deltaMs);
+
+    const completedRow = await db.prisma.prayerSlot.findUnique({ where: { id: completedBook.json().id } });
+    expect(completedRow!.status).toBe('COMPLETED');
+    expect(completedRow!.startTime.getTime()).toBe(new Date(completedBook.json().startTime).getTime() + deltaMs);
+  });
+
+  it('403 für Nicht-Organisator', async () => {
+    const orga = await loginAs('wk-shift-orga2@example.com');
+    const mallory = await loginAs('wk-shift-mallory@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'wk-ShiftFremd', startDate: future(0), endDate: future(10), visibility: 'PUBLIC' },
+    });
+    const res = await app.inject({
+      method: 'POST', url: `/projects/${create.json().id}/shift`, cookies: { session: mallory },
+      payload: { newStartDate: future(1) },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('sendet dedupliziert Zeitplan-Mails an künftige Gebuchte mit alten+neuen Zeiten', async () => {
+    const orga = await loginAs('wk-shift-mail-orga@example.com');
+    const dora = await loginAs('wk-shift-mail-dora@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'wk-ShiftMail', startDate: future(0), endDate: future(240), visibility: 'PUBLIC' },
+    });
+    const pid = create.json().id;
+
+    // Dora bucht ZWEI Stunden — soll EINE gebündelte Mail bekommen (dedupliziert), nicht zwei.
+    const d1 = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: dora },
+      payload: { startTime: future(5) },
+    });
+    const d2 = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: dora },
+      payload: { startTime: future(6) },
+    });
+    // Gast mit E-Mail bucht ebenfalls.
+    const guest = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`,
+      payload: { startTime: future(7), guestName: 'wk-Gast Shift', guestEmail: 'wk-gast-shift@example.com' },
+    });
+    // Gast OHNE E-Mail: darf mitverschoben werden, bekommt aber logischerweise keine Mail.
+    await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`,
+      payload: { startTime: future(8), guestName: 'wk-Gast Ohne Mail' },
+    });
+
+    scheduleChanges.length = 0;
+    const deltaMs = 3 * DAY;
+    const newStart = new Date(new Date(create.json().startDate).getTime() + deltaMs).toISOString();
+    const shift = await app.inject({
+      method: 'POST', url: `/projects/${pid}/shift`, cookies: { session: orga },
+      payload: { newStartDate: newStart },
+    });
+    expect(shift.statusCode).toBe(200);
+
+    const doraMail = scheduleChanges.filter((m) => m.email === 'wk-shift-mail-dora@example.com');
+    expect(doraMail).toHaveLength(1); // dedupliziert trotz 2 Stunden
+    expect(doraMail[0].m.slots).toHaveLength(2);
+    const d1New = new Date(new Date(d1.json().startTime).getTime() + deltaMs).toISOString();
+    const d2New = new Date(new Date(d2.json().startTime).getTime() + deltaMs).toISOString();
+    const newTimes = doraMail[0].m.slots.map((s) => s.newStartTime).sort();
+    expect(newTimes).toEqual([d1New, d2New].sort());
+    expect(doraMail[0].m.slots[0].oldStartTime).not.toBe(doraMail[0].m.slots[0].newStartTime);
+
+    const guestMail = scheduleChanges.filter((m) => m.email === 'wk-gast-shift@example.com');
+    expect(guestMail).toHaveLength(1);
+    expect(guestMail[0].m.slots).toHaveLength(1);
+    expect(new Date(guestMail[0].m.slots[0].newStartTime).getTime()).toBe(
+      new Date(guest.json().startTime).getTime() + deltaMs,
+    );
+
+    // Kein Eintrag für den mailless Gast.
+    const noMailGuestEntries = scheduleChanges.filter((m) => m.m.name === 'wk-Gast Ohne Mail');
+    expect(noMailGuestEntries).toHaveLength(0);
+  });
+
+  it('setzt remindedAt für künftige Slots zurück, damit Erinnerungen neu feuern', async () => {
+    const orga = await loginAs('wk-shift-remind-orga@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'wk-ShiftRemind', startDate: future(0), endDate: future(10), visibility: 'PUBLIC' },
+    });
+    const pid = create.json().id;
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: orga },
+      payload: { startTime: future(5) },
+    });
+    await db.prisma.prayerSlot.update({
+      where: { id: book.json().id },
+      data: { remindedAt: new Date() },
+    });
+    const before = await db.prisma.prayerSlot.findUnique({ where: { id: book.json().id } });
+    expect(before!.remindedAt).not.toBeNull();
+
+    const newStart = new Date(new Date(create.json().startDate).getTime() + DAY).toISOString();
+    await app.inject({
+      method: 'POST', url: `/projects/${pid}/shift`, cookies: { session: orga },
+      payload: { newStartDate: newStart },
+    });
+
+    const after = await db.prisma.prayerSlot.findUnique({ where: { id: book.json().id } });
+    expect(after!.remindedAt).toBeNull();
+  });
+});
+
+describe('wk-DELETE /projects/:id — Wache löschen (Ersteller-Lebenszyklus)', () => {
+  it('403 für Nicht-Organisator', async () => {
+    const orga = await loginAs('wk-del-orga@example.com');
+    const mallory = await loginAs('wk-del-mallory@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'wk-DelFremd', startDate: future(0), endDate: future(10), visibility: 'PUBLIC' },
+    });
+    const res = await app.inject({ method: 'DELETE', url: `/projects/${create.json().id}`, cookies: { session: mallory } });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('löscht Projekt vollständig (keine verwaisten Slots/Requests/Memberships) und 404 danach', async () => {
+    const orga = await loginAs('wk-del-cascade-orga@example.com');
+    const stranger = await loginAs('wk-del-cascade-stranger@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'wk-DelKaskade', startDate: future(0), endDate: future(10), visibility: 'PUBLIC' },
+    });
+    const pid = create.json().id;
+
+    // Fremdbuchung (macht stranger zum Member) + eigene Anliegen-Nachricht (PrayerRequest).
+    await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: stranger },
+      payload: { startTime: future(2) },
+    });
+    await app.inject({
+      method: 'POST', url: `/projects/${pid}/requests`, cookies: { session: orga },
+      payload: { text: 'wk-Testanliegen für Löschung' },
+    });
+
+    const del = await app.inject({ method: 'DELETE', url: `/projects/${pid}`, cookies: { session: orga } });
+    expect(del.statusCode).toBe(204);
+
+    const getAfter = await app.inject({ method: 'GET', url: `/projects/${pid}` });
+    expect(getAfter.statusCode).toBe(404);
+
+    expect(await db.prisma.prayerSlot.count({ where: { projectId: pid } })).toBe(0);
+    expect(await db.prisma.membership.count({ where: { projectId: pid } })).toBe(0);
+    expect(await db.prisma.prayerRequest.count({ where: { projectId: pid } })).toBe(0);
+  });
+
+  it('sendet dedupliziert Abschieds-Mail an künftige Gebuchte, dann 404', async () => {
+    const orga = await loginAs('wk-del-mail-orga@example.com');
+    const dora = await loginAs('wk-del-mail-dora@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'wk-DelMail', startDate: future(0), endDate: future(10), visibility: 'PUBLIC' },
+    });
+    const pid = create.json().id;
+    const d1 = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: dora },
+      payload: { startTime: future(2) },
+    });
+    const d2 = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: dora },
+      payload: { startTime: future(3) },
+    });
+    const guest = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`,
+      payload: { startTime: future(4), guestName: 'wk-Gast Del', guestEmail: 'wk-gast-del@example.com' },
+    });
+
+    farewells.length = 0;
+    const del = await app.inject({ method: 'DELETE', url: `/projects/${pid}`, cookies: { session: orga } });
+    expect(del.statusCode).toBe(204);
+
+    const doraFarewell = farewells.filter((f) => f.email === 'wk-del-mail-dora@example.com');
+    expect(doraFarewell).toHaveLength(1); // dedupliziert
+    expect(doraFarewell[0].m.slots.sort()).toEqual(
+      [d1.json().startTime, d2.json().startTime].sort(),
+    );
+
+    const guestFarewell = farewells.filter((f) => f.email === 'wk-gast-del@example.com');
+    expect(guestFarewell).toHaveLength(1);
+    expect(guestFarewell[0].m.slots).toEqual([guest.json().startTime]);
+
+    const getAfter = await app.inject({ method: 'GET', url: `/projects/${pid}` });
+    expect(getAfter.statusCode).toBe(404);
   });
 });
