@@ -56,6 +56,26 @@ describe('projects', () => {
     expect(direct.statusCode).toBe(403);
   });
 
+  it('Liste liefert korrekte bookedSlots pro Projekt (inkl. 0) — Netz für den N+1-Fix', async () => {
+    const dora = await loginAs('dora@example.com');
+    const mk = async (title: string) => (await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: dora },
+      payload: { title, startDate: future(1), endDate: future(4), visibility: 'PUBLIC' },
+    })).json();
+    const withBookings = await mk('Zwei Buchungen');
+    const empty = await mk('Null Buchungen');
+    for (const h of [1, 2]) {
+      await app.inject({
+        method: 'POST', url: `/projects/${withBookings.id}/slots`, cookies: { session: dora },
+        payload: { startTime: future(h) },
+      });
+    }
+    const list = (await app.inject({ method: 'GET', url: '/projects', cookies: { session: dora } })).json();
+    expect(list.find((p: { id: string }) => p.id === withBookings.id).bookedSlots).toBe(2);
+    expect(list.find((p: { id: string }) => p.id === empty.id).bookedSlots).toBe(0);
+    expect(list.find((p: { id: string }) => p.id === empty.id).totalSlots).toBe(3);
+  });
+
   it('organizerName: Default Klartext auch anonym; maskiert nur bei maskNames-Opt-in', async () => {
     const carol = await loginAs('carol@example.com');
     const create = await app.inject({

@@ -18,8 +18,10 @@ const CreateRequestBody = z.object({
 });
 const ReminderBody = z.object({ minutesBefore: z.number().int().min(5).max(24 * 60) });
 
-export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClient }) {
-  const { prisma } = deps;
+export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; env?: { STATS_CACHE_TTL_MS: number } }) {
+  const { prisma, env } = deps;
+  // Lasttest-Fix: Landing-Poll (60s pro offenem Tab) darf nicht mit der Nutzerzahl skalieren.
+  let statsCache: { data: unknown; ts: number } | null = null;
 
   async function loadProjectChecked(req: FastifyRequest) {
     const { id } = req.params as { id: string };
@@ -92,6 +94,8 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
   // ── Public-Stats für die Landing (Globus) ───────────────
 
   app.get('/stats/public', async () => {
+    const ttl = env?.STATS_CACHE_TTL_MS ?? 0;
+    if (ttl > 0 && statsCache && Date.now() - statsCache.ts < ttl) return statsCache.data;
     const now = new Date();
     const activeWhere = { status: 'ACTIVE', startDate: { lte: now }, endDate: { gte: now } };
     const [activeChains, heldSlots, located] = await Promise.all([
@@ -128,7 +132,7 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
         take: 60,
       }),
     ]);
-    return {
+    const data = {
       activeChains,
       heldSlots,
       points: located.map((p) => ({
@@ -147,6 +151,8 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
         })),
       })),
     };
+    statsCache = { data, ts: Date.now() };
+    return data;
   });
 
   // ── Geocoding (W3.6, GeoNames cities15000) ─────────────

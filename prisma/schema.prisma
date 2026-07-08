@@ -122,6 +122,8 @@ model ReminderPreference {
 model MagicToken {
   id        String    @id @default(cuid())
   token     String    @unique
+  code      String?   // 6-stelliger Login-Code (gehasht) — Alternative zum Link für andere Geräte
+  codeAttempts Int    @default(0) // Brute-Force-Bremse: nach 5 Fehlversuchen gesperrt
   userId    String
   user      User      @relation(fields: [userId], references: [id])
   expiresAt DateTime

@@ -24,7 +24,7 @@ beforeAll(async () => {
   db = await makeTestDb();
   app = await buildApp({
     prisma: db.prisma,
-    env: parseEnv({ APP_URL: 'http://localhost:3000' }),
+    env: parseEnv({ APP_URL: 'http://localhost:3000', STATS_CACHE_TTL_MS: '0' }),
     mailer: {
       async sendMagicLink(email, url) { captured.push({ email, url }); },
       async sendReminder(email, r) { reminders.push({ email, r }); },
@@ -300,5 +300,39 @@ describe('W3 — Recurring', () => {
     const recur = await app.inject({ method: 'POST', url: `/slots/${slotId}/recur`, cookies: { session: owner } });
     expect(recur.statusCode).toBe(200);
     expect(recur.json().createdSlotIds).toHaveLength(2); // +7d, +14d
+  });
+});
+
+describe('Lasttest-Fix: /stats/public TTL-Cache', () => {
+  it('liefert innerhalb der TTL die gecachte Antwort (Landing-Poll skaliert nicht mit Beter-Zahl)', async () => {
+    const { buildApp: build } = await import('../app.js');
+    const cachedApp = await build({
+      prisma: db.prisma,
+      env: parseEnv({ APP_URL: 'http://localhost:3000', STATS_CACHE_TTL_MS: '60000' }),
+      mailer: { async sendMagicLink() {} },
+    });
+    await cachedApp.ready();
+    try {
+      const first = await cachedApp.inject({ method: 'GET', url: '/stats/public' });
+      expect(first.statusCode).toBe(200);
+      const before = first.json().activeChains;
+
+      // Neues aktives Projekt anlegen — die gecachte Antwort darf sich NICHT ändern.
+      const owner = await loginAs('cache-owner@example.com');
+      const future = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
+      await app.inject({
+        method: 'POST', url: '/projects', cookies: { session: owner },
+        payload: { title: 'CacheTest', startDate: future(-1), endDate: future(4), visibility: 'PUBLIC' },
+      });
+
+      const second = await cachedApp.inject({ method: 'GET', url: '/stats/public' });
+      expect(second.json().activeChains).toBe(before);
+
+      // Ohne Cache (Haupt-App, TTL=0) ist der neue Stand sofort sichtbar.
+      const fresh = await app.inject({ method: 'GET', url: '/stats/public' });
+      expect(fresh.json().activeChains).toBe(before + 1);
+    } finally {
+      await cachedApp.close();
+    }
   });
 });

@@ -14,6 +14,7 @@ const EnvSchema = z.object({
     .transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean)),
   DATA_DIR: z.string().default('./data'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  STATS_CACHE_TTL_MS: z.coerce.number().int().min(0).default(30_000), // /stats/public-Cache (Lasttest-Fix); 0 = aus
   COOKIE_SECURE: boolish.default(false),
   SMTP_URL: z.string().optional().default(''),
   SMTP_FROM: z.string().default('24pray <no-reply@24pray.local>'),

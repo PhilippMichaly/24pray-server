@@ -22,6 +22,13 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   const { prisma, env } = deps;
   const mailer = deps.mailer ?? createMailer({ smtpUrl: env.SMTP_URL, from: env.SMTP_FROM });
 
+  // Lasttest-Fix: WAL entkoppelt Reader von Writern (persistiert in der DB-Datei).
+  try {
+    await prisma.$queryRawUnsafe('PRAGMA journal_mode=WAL');
+  } catch {
+    /* z.B. read-only FS — App soll trotzdem starten */
+  }
+
   const app = Fastify({ logger: false });
 
   // APP_URL immer erlaubt; CORS_ORIGINS fügt weitere Frontend-Origins hinzu (§6.5).
@@ -42,8 +49,8 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   app.get('/health', async () => ({ ok: true }));
   authRoutes(app, { prisma, mailer, env });
   projectRoutes(app, { prisma });
-  slotRoutes(app, { prisma });
-  communityRoutes(app, { prisma });
+  slotRoutes(app, { prisma, mailer, env });
+  communityRoutes(app, { prisma, env });
 
   return app;
 }

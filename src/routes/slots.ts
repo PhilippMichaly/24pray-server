@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
+import type { Mailer } from '../lib/mailer.js';
+import type { Env } from '../env.js';
+import { buildIcs, googleCalendarUrl, type CalendarEvent } from '../lib/calendar.js';
 import { generateToken } from '../lib/tokens.js';
 import { requireUser } from '../plugins/auth.js';
 import { BookSlotBody } from '../schemas/slots.js';
@@ -16,8 +19,16 @@ function httpError(status: number, message: string) {
 const CancelQuery = z.object({ guestToken: z.string().optional() });
 const InviteQuery = z.object({ invite: z.string().optional() });
 
-export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient }) {
-  const { prisma } = deps;
+export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env }) {
+  const { prisma, mailer, env } = deps;
+
+  const slotEvent = (slot: { id: string; startTime: Date; endTime: Date; projectId: string }, title: string): CalendarEvent => ({
+    uid: slot.id,
+    title: `Gebetsstunde — ${title}`,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+    url: env ? `${env.APP_URL}/projects/${slot.projectId}` : undefined,
+  });
 
   // Grid for a project (PRIVATE: Organizer, Mitglied oder ?invite=<token> — W3-Gap-Fix)
   app.get('/projects/:id/slots', async (req) => {
@@ -67,13 +78,11 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient })
     const userId = req.user?.id ?? null;
     if (!userId && !body.guestName) throw httpError(400, 'Name erforderlich für Gastbuchung');
 
-    const slot = await prisma.$transaction(async (tx) => {
-      const existing = await tx.prayerSlot.findFirst({
-        where: { projectId: id, startTime, status: { in: ['BOOKED', 'COMPLETED'] } },
-      });
-      if (existing) throw httpError(409, 'Dieses Zeitfenster ist bereits belegt');
-
-      return tx.prayerSlot.create({
+    // Atomar statt Transaktion (Lasttest-Fix): der partielle Unique-Index
+    // PrayerSlot_active_slot_unique macht Doppelbuchung zum DB-Konflikt (P2002 → 409).
+    let slot;
+    try {
+      slot = await prisma.prayerSlot.create({
         data: {
           projectId: id,
           userId,
@@ -89,10 +98,39 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient })
           locationLon: body.locationLon ?? null,
         },
       });
-    });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'P2002') {
+        throw httpError(409, 'Dieses Zeitfenster ist bereits belegt');
+      }
+      throw err;
+    }
     // Buchung macht eingeloggte User zu Mitgliedern (W3.2 Membership).
     if (userId) await ensureMembership(prisma, userId, id);
+
+    // Gast mit E-Mail: Bestätigung mit Kalender-Links (Fehler dürfen die Buchung nie kippen).
+    if (!userId && slot.guestEmail && mailer?.sendBookingConfirmation && env) {
+      const ev = slotEvent(slot, project.title);
+      mailer.sendBookingConfirmation(slot.guestEmail, {
+        name: slot.guestName ?? '',
+        projectTitle: project.title,
+        startTime: slot.startTime.toISOString(),
+        timezone: project.timezone,
+        icsUrl: `${env.APP_URL}/api/slots/${slot.id}/ics`,
+        googleUrl: googleCalendarUrl(ev),
+      }).catch((err) => console.error(`[mail] booking confirmation failed for slot ${slot.id}:`, err));
+    }
     return slot;
+  });
+
+  // Kalendereintrag für einen gebuchten Slot (öffentlich über die unerratbare Slot-ID).
+  app.get('/slots/:id/ics', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const slot = await prisma.prayerSlot.findUnique({ where: { id }, include: { project: true } });
+    if (!slot) throw httpError(404, 'Slot nicht gefunden');
+    reply
+      .header('content-type', 'text/calendar; charset=utf-8')
+      .header('content-disposition', 'attachment; filename="24pray-gebetsstunde.ics"');
+    return buildIcs(slotEvent(slot, slot.project.title));
   });
 
   // W3.2: „Jede Woche übernehmen" — wöchentliche Wiederholung aus eigenem Slot materialisieren.

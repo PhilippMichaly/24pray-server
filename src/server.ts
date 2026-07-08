@@ -16,7 +16,7 @@ async function main() {
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
   console.log(`24pray-api listening on :${env.PORT} (APP_URL=${env.APP_URL})`);
   // W3.2: Completion- + Reminder-Job (minütlich)
-  const stopJobs = startJobs({ prisma, mailer });
+  const stopJobs = startJobs({ prisma, mailer, appUrl: env.APP_URL });
 
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received, shutting down…`);

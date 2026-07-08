@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Mailer } from './mailer.js';
+import { googleCalendarUrl } from './calendar.js';
 
 /** W3.2: Abgelaufene BOOKED-Slots → COMPLETED (Basis für die Statistik). */
 export async function completeElapsedSlots(prisma: PrismaClient, now = new Date()): Promise<number> {
@@ -19,6 +20,7 @@ export async function sendDueReminders(
   prisma: PrismaClient,
   mailer: Mailer,
   now = new Date(),
+  appUrl?: string, // für Kalender-Links in der Mail
 ): Promise<number> {
   const maxLead = 24 * 60; // Obergrenze, damit der Scan begrenzt bleibt
   const candidates = await prisma.prayerSlot.findMany({
@@ -41,11 +43,19 @@ export async function sendDueReminders(
     const name = slot.user?.name ?? slot.guestName ?? '';
 
     try {
+      const ev = {
+        uid: slot.id,
+        title: `Gebetsstunde — ${slot.project.title}`,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        url: appUrl ? `${appUrl}/projects/${slot.projectId}` : undefined,
+      };
       await mailer.sendReminder?.(email, {
         name,
         projectTitle: slot.project.title,
         startTime: slot.startTime.toISOString(),
         timezone: slot.project.timezone,
+        ...(appUrl ? { icsUrl: `${appUrl}/api/slots/${slot.id}/ics`, googleUrl: googleCalendarUrl(ev) } : {}),
       });
       await prisma.prayerSlot.update({ where: { id: slot.id }, data: { remindedAt: now } });
       sent++;
@@ -59,15 +69,20 @@ export async function sendDueReminders(
 
 /** Startet beide Jobs im Intervall (server.ts). Gibt eine stop()-Funktion zurück. */
 export function startJobs(
-  deps: { prisma: PrismaClient; mailer: Mailer },
+  deps: { prisma: PrismaClient; mailer: Mailer; appUrl?: string },
   intervalMs = 60_000,
 ): () => void {
+  let running = false; // Overlap-Guard: ein langsamer Tick (SMTP!) darf sich nicht stapeln
   const tick = async () => {
+    if (running) return;
+    running = true;
     try {
       await completeElapsedSlots(deps.prisma);
-      await sendDueReminders(deps.prisma, deps.mailer);
+      await sendDueReminders(deps.prisma, deps.mailer, new Date(), deps.appUrl);
     } catch (err) {
       console.error('[jobs] tick failed:', err);
+    } finally {
+      running = false;
     }
   };
   void tick(); // sofort beim Start (Aufholen nach Downtime)

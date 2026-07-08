@@ -3,7 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { generateToken } from '../lib/tokens.js';
 import { requireUser } from '../plugins/auth.js';
 import { CreateProjectBody, UpdateProjectBody } from '../schemas/projects.js';
-import { toProjectWithStats } from '../lib/projectView.js';
+import { toProjectWithStats, toProjectListWithStats } from '../lib/projectView.js';
 import { canReadProject, ensureMembership } from '../lib/access.js';
 
 function httpError(status: number, message: string) {
@@ -25,7 +25,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
       include: { organizer: true },
       orderBy: { createdAt: 'desc' },
     });
-    return Promise.all(projects.map((p) => toProjectWithStats(prisma, p, req.user?.id)));
+    return toProjectListWithStats(prisma, projects, req.user?.id);
   });
 
   // Create

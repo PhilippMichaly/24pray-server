@@ -7,6 +7,7 @@ import { makeTestDb, type TestDb } from '../test/helpers.js';
 let db: TestDb;
 let app: FastifyInstance;
 const captured: { email: string; url: string }[] = [];
+const bookingMails: { email: string; m: import('../lib/mailer.js').BookingMail }[] = [];
 
 let loginSeq = 0;
 async function loginAs(email: string): Promise<string> {
@@ -24,7 +25,10 @@ beforeAll(async () => {
   app = await buildApp({
     prisma: db.prisma,
     env: parseEnv({ APP_URL: 'http://localhost:3000' }),
-    mailer: { async sendMagicLink(email, url) { captured.push({ email, url }); } },
+    mailer: {
+      async sendMagicLink(email, url) { captured.push({ email, url }); },
+      async sendBookingConfirmation(email, m) { bookingMails.push({ email, m }); },
+    },
   });
   await app.ready();
 });
@@ -123,6 +127,39 @@ describe('slots', () => {
     const mine = grid.json().find((s: { startTime: string }) => s.startTime === at(3));
     expect(mine.isMine).toBe(true);
     expect(mine.slotId).toBeTruthy();
+  });
+
+  it('GET /slots/:id/ics liefert einen Kalendereintrag (text/calendar)', async () => {
+    const u = await loginAs('ics@example.com');
+    const pid = await makeProject(u);
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: u },
+      payload: { startTime: at(2) },
+    });
+    const slotId = book.json().id;
+
+    const ics = await app.inject({ method: 'GET', url: `/slots/${slotId}/ics` });
+    expect(ics.statusCode).toBe(200);
+    expect(ics.headers['content-type']).toContain('text/calendar');
+    expect(ics.body).toContain('BEGIN:VEVENT');
+    expect(ics.body).toContain('DTSTART:20260620T020000Z');
+    expect(ics.body).toContain('Slots'); // Projekttitel im SUMMARY
+    expect(await app.inject({ method: 'GET', url: '/slots/gibtsnicht/ics' }).then((r) => r.statusCode)).toBe(404);
+  });
+
+  it('Gast-Buchung mit E-Mail verschickt Bestätigung mit Kalender-Links', async () => {
+    const u = await loginAs('conf-orga@example.com');
+    const pid = await makeProject(u);
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`,
+      payload: { startTime: at(3), guestName: 'Conf Gast', guestEmail: 'gast-conf@example.com' },
+    });
+    expect(book.statusCode).toBe(200);
+    const mail = bookingMails.find((b) => b.email === 'gast-conf@example.com');
+    expect(mail).toBeTruthy();
+    expect(mail!.m.projectTitle).toBe('Slots');
+    expect(mail!.m.icsUrl).toContain(`/api/slots/${book.json().id}/ics`);
+    expect(mail!.m.googleUrl).toContain('calendar.google.com');
   });
 
   it('guest booking mints a guestToken; guest can self-cancel with it; foreign token = 403', async () => {
