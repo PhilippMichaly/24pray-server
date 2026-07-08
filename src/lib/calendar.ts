@@ -28,7 +28,7 @@ export function buildIcs(ev: CalendarEvent): string {
     `DTSTART:${icsDate(ev.startTime)}`,
     `DTEND:${icsDate(ev.endTime)}`,
     `SUMMARY:${escapeIcs(ev.title)}`,
-    ...(ev.url ? [`URL:${ev.url}`, `DESCRIPTION:${escapeIcs(`Zur Kette: ${ev.url}`)}`] : []),
+    ...(ev.url ? [`URL:${ev.url}`, `DESCRIPTION:${escapeIcs(`Zur Gebetswache: ${ev.url}`)}`] : []),
     'END:VEVENT',
     'END:VCALENDAR',
   ].join('\r\n');
@@ -39,7 +39,7 @@ export function googleCalendarUrl(ev: CalendarEvent): string {
     action: 'TEMPLATE',
     text: ev.title,
     dates: `${icsDate(ev.startTime)}/${icsDate(ev.endTime)}`,
-    ...(ev.url ? { details: `Zur Kette: ${ev.url}` } : {}),
+    ...(ev.url ? { details: `Zur Gebetswache: ${ev.url}` } : {}),
   });
   return `https://calendar.google.com/calendar/render?${p.toString()}`;
 }

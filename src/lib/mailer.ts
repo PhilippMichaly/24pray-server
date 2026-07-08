@@ -117,7 +117,7 @@ export function createMailer(config: MailerConfig): Mailer {
       await transport.sendMail({
         from: config.from,
         to: email,
-        subject: `24pray — neue Stunde in deiner Kette (${n.projectTitle})`,
+        subject: `24pray — neue Stunde in deiner Wache (${n.projectTitle})`,
         text: `${n.bookerName} hat eine Stunde in „${n.projectTitle}" übernommen: ${when} (${n.timezone}).`,
         html: `<p><strong>${n.bookerName}</strong> hat eine Stunde in „<strong>${n.projectTitle}</strong>" übernommen: <strong>${when}</strong> (${n.timezone}).</p>`,
       });

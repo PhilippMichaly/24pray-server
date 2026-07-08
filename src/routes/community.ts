@@ -59,7 +59,7 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
     // Eine Kette = EIN Anliegen des Erstellers: nur der Owner postet Updates dazu;
     // alle anderen (Gäste wie Eingeloggte) tragen ausschließlich Gebetsstunden bei.
     if (!user || user.id !== project.organizerId) {
-      throw httpError(403, 'Nur die Erstellerin/der Ersteller der Kette kann Updates posten');
+      throw httpError(403, 'Nur die Erstellerin/der Ersteller der Wache kann Updates posten');
     }
     const authorName = user.name;
     const created = await prisma.prayerRequest.create({
