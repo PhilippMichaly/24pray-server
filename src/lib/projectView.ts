@@ -11,6 +11,7 @@ export interface ProjectWithStats {
   endDate: string;
   timezone: string;
   slotDurationMinutes: number;
+  maskNames: boolean;
   locationName: string | null;
   inviteToken: string;
   organizerId: string;
@@ -47,13 +48,14 @@ export async function toProjectWithStats(
     endDate: project.endDate.toISOString(),
     timezone: project.timezone,
     slotDurationMinutes: project.slotDurationMinutes,
+    maskNames: project.maskNames,
     locationName: project.locationName,
     inviteToken: project.organizerId === requesterId ? project.inviteToken : '',
     organizerId: project.organizerId,
     createdAt: project.createdAt.toISOString(),
     totalSlots,
     bookedSlots,
-    // Anonyme Betrachter sehen den Organisator maskiert (§E5) — wie im Slot-Grid.
-    organizerName: requesterId ? organizerName : maskName(organizerName) ?? '',
+    // Masking nur bei Projekt-Opt-in (§E5-Revision 2026-07-08) — Default ist Klartext.
+    organizerName: !requesterId && project.maskNames ? maskName(organizerName) ?? '' : organizerName,
   };
 }

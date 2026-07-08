@@ -44,7 +44,7 @@ describe('buildSlotGrid', () => {
     expect(grid[1].isMine).toBe(true);
   });
 
-  it('isMine=false for another user; requesterId=null masks the name (§E5)', () => {
+  it('Namen sind per Default Klartext; Masking nur als Opt-in (maskNames)', () => {
     const start = new Date('2026-06-15T00:00:00.000Z');
     const end = new Date('2026-06-15T01:00:00.000Z');
     const booked = [
@@ -54,9 +54,12 @@ describe('buildSlotGrid', () => {
     expect(asOther[0].isMine).toBe(false);
     expect(asOther[0].userName).toBe('Ruth Klein'); // eingeloggt: voller Name
 
-    const asAnon = buildSlotGrid(start, end, booked, null, 60);
-    expect(asAnon[0].userName).toBe('Ruth K.'); // anonym: maskiert
-    expect(asAnon[0].isMine).toBe(false);
+    const asAnonDefault = buildSlotGrid(start, end, booked, null, 60);
+    expect(asAnonDefault[0].userName).toBe('Ruth Klein'); // Default: Klartext schafft Verbindung
+    expect(asAnonDefault[0].isMine).toBe(false);
+
+    const asAnonMasked = buildSlotGrid(start, end, booked, null, 60, true);
+    expect(asAnonMasked[0].userName).toBe('Ruth K.'); // Opt-in: maskiert (§E5)
   });
 });
 

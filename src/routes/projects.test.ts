@@ -56,21 +56,25 @@ describe('projects', () => {
     expect(direct.statusCode).toBe(403);
   });
 
-  it('organizerName ist für anonyme Betrachter maskiert (§E5, F1)', async () => {
+  it('organizerName: Default Klartext auch anonym; maskiert nur bei maskNames-Opt-in', async () => {
     const carol = await loginAs('carol@example.com');
     const create = await app.inject({
       method: 'POST', url: '/projects', cookies: { session: carol },
       payload: { title: 'Offene Kette E5', startDate: future(1), endDate: future(4), visibility: 'PUBLIC' },
     });
     const proj = create.json();
-    expect(proj.organizerName).toBe('carol'); // eigene Sicht: voll
-
-    const anonList = await app.inject({ method: 'GET', url: '/projects' });
-    const listed = anonList.json().find((p: { id: string }) => p.id === proj.id);
-    expect(listed.organizerName).toBe('ca…'); // anonym: maskiert
+    expect(proj.organizerName).toBe('carol');
+    expect(proj.maskNames).toBe(false);
 
     const anonGet = await app.inject({ method: 'GET', url: `/projects/${proj.id}` });
-    expect(anonGet.json().organizerName).toBe('ca…');
+    expect(anonGet.json().organizerName).toBe('carol'); // Default: Klartext
+
+    const masked = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: carol },
+      payload: { title: 'Diskrete Kette', startDate: future(1), endDate: future(4), visibility: 'PUBLIC', maskNames: true },
+    });
+    const anonMasked = await app.inject({ method: 'GET', url: `/projects/${masked.json().id}` });
+    expect(anonMasked.json().organizerName).toBe('ca…'); // Opt-in: maskiert
   });
 
   it('inviteToken only leaks to the organizer', async () => {

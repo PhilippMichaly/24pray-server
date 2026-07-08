@@ -46,6 +46,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient })
       booked,
       req.user?.id ?? null,
       project.slotDurationMinutes,
+      project.maskNames,
     );
   });
 

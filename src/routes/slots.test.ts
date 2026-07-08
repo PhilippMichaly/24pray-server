@@ -141,7 +141,7 @@ describe('slots', () => {
     // Anonymer Betrachter sieht den Namen maskiert.
     const anonGrid = await app.inject({ method: 'GET', url: `/projects/${projectId}/slots` });
     const gslot = anonGrid.json().find((s: { startTime: string }) => s.startTime === at(4));
-    expect(gslotName(gslot)).toBe('Gast G.');
+    expect(gslotName(gslot)).toBe('Gast Gustav'); // Default Klartext; Opt-in-Masking siehe slotGrid.test
 
     // Falscher Token → 403.
     const wrong = await app.inject({ method: 'DELETE', url: `/slots/${slotId}?guestToken=nope` });

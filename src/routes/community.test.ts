@@ -95,7 +95,20 @@ describe('W3 — Anliegen-Feed', () => {
     expect(pGuestNoName.statusCode).toBe(400);
 
     const anon = await app.inject({ method: 'GET', url: `/projects/${id}/requests` });
-    expect(anon.json()[0].authorName).toBe('Ruth K.'); // §E5 maskiert
+    expect(anon.json()[0].authorName).toBe('Ruth Klein'); // Default: Klartext auch anonym
+
+    // Opt-in-Masking: eigenes Projekt mit maskNames=true
+    const resM = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'FeedTest maskiert', startDate: at(0), endDate: at(6), visibility: 'PUBLIC', maskNames: true },
+    });
+    const idM = resM.json().id;
+    await app.inject({
+      method: 'POST', url: `/projects/${idM}/requests`, cookies: { session: owner },
+      payload: { text: 'Diskretes Anliegen.' },
+    });
+    const anonM = await app.inject({ method: 'GET', url: `/projects/${idM}/requests` });
+    expect(anonM.json()[0].authorName).toBe('Ruth K.'); // Opt-in: maskiert (§E5)
     const authed = await app.inject({ method: 'GET', url: `/projects/${id}/requests`, cookies: { session: owner } });
     expect(authed.json()[0].authorName).toBe('Ruth Klein');
   });

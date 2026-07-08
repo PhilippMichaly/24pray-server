@@ -38,6 +38,7 @@ export function buildSlotGrid(
   booked: BookedSlotInput[],
   requesterId: string | null,
   slotDurationMinutes: number,
+  maskNames = false, // Opt-in pro Projekt — Default ist Klartext (schafft Verbindung)
 ): SlotView[] {
   const slotMs = slotLengthMs(slotDurationMinutes);
   const byStart = new Map<number, BookedSlotInput>();
@@ -52,8 +53,8 @@ export function buildSlotGrid(
       startTime: new Date(t).toISOString(),
       endTime: new Date(t + slotMs).toISOString(),
       status: hit ? 'BOOKED' : 'FREE',
-      // Für anonyme Betrachter (requesterId == null) Namen maskieren (§E5).
-      userName: requesterId === null ? maskName(rawName) : rawName,
+      // Nur bei Projekt-Opt-in: Namen für anonyme Betrachter maskieren (§E5-Revision).
+      userName: requesterId === null && maskNames ? maskName(rawName) : rawName,
       isMine: requesterId !== null && hit?.userId === requesterId,
     });
   }

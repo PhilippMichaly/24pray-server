@@ -39,7 +39,7 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
-    const anonymous = !req.user;
+    const anonymous = !req.user && project.maskNames; // Masking nur bei Projekt-Opt-in
     return items.map((r) => ({
       id: r.id,
       authorName: anonymous ? maskName(r.authorName) : r.authorName, // §E5 auch im Feed
@@ -79,7 +79,7 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
       e.hours += hoursPerSlot;
       byPerson.set(key, e);
     }
-    const anonymous = !req.user;
+    const anonymous = !req.user && project.maskNames; // Masking nur bei Projekt-Opt-in
     const perPerson = [...byPerson.values()]
       .sort((a, b) => b.hours - a.hours)
       .map((p) => ({ name: anonymous ? maskName(p.name) : p.name, hours: Math.round(p.hours * 100) / 100 }));
