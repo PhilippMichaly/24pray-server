@@ -283,6 +283,33 @@ describe('W3.6 — Geocoding', () => {
     // zu kurz → leer
     expect((await app.inject({ method: 'GET', url: '/geocode?q=m' })).json()).toEqual([]);
   });
+
+  it('Populations-Tiebreak: bei gleicher Wortanfang-Güte gewinnt die größere Stadt (cities500-Kollisionen)', async () => {
+    // "münchenroda".startsWith("münchen") → gleicher Rang (0) wie "münchen" selbst;
+    // ohne Tiebreak könnte die 600-Seelen-Gemeinde vor der Millionenstadt landen.
+    await db.prisma.city.deleteMany(); // isoliert von Fixtures des vorigen Tests
+    await db.prisma.city.createMany({
+      data: [
+        { id: 101, name: 'Münchenroda', country: 'DE', lat: 50.95, lon: 11.6, population: 600, search: 'münchenroda,muenchenroda' },
+        { id: 102, name: 'München', country: 'DE', lat: 48.14, lon: 11.58, population: 1_500_000, search: 'münchen,muenchen,munich' },
+        { id: 103, name: 'Münchenbernsdorf', country: 'DE', lat: 50.79, lon: 11.78, population: 900, search: 'münchenbernsdorf,muenchenbernsdorf' },
+      ],
+    });
+    const r = await app.inject({ method: 'GET', url: '/geocode?q=m%C3%BCnchen' });
+    expect(r.json().map((c: { name: string }) => c.name)).toEqual(['München', 'Münchenbernsdorf', 'Münchenroda']);
+  });
+
+  it('findet ein Dorf ≥500 EW (cities500-Abdeckung, z.B. Petershausen bei München)', async () => {
+    await db.prisma.city.deleteMany();
+    await db.prisma.city.createMany({
+      data: [
+        { id: 201, name: 'Petershausen', country: 'DE', lat: 48.40967, lon: 11.47056, population: 5965, search: 'petershausen' },
+      ],
+    });
+    const r = await app.inject({ method: 'GET', url: '/geocode?q=petershausen' });
+    const names = r.json().map((c: { name: string }) => c.name);
+    expect(names).toContain('Petershausen');
+  });
 });
 
 describe('W3 — Recurring', () => {

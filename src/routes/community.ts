@@ -159,7 +159,7 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
     return data;
   });
 
-  // ── Geocoding (W3.6, GeoNames cities15000) ─────────────
+  // ── Geocoding (W3.6, GeoNames cities500) ────────────────
 
   app.get('/geocode', {
     config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
@@ -171,15 +171,17 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
       where: { search: { contains: term } },
       orderBy: { population: 'desc' },
       take: 30,
-      select: { name: true, country: true, lat: true, lon: true, search: true },
+      select: { name: true, country: true, lat: true, lon: true, search: true, population: true },
     });
-    // Ranking: Wortanfang (Name ODER irgendeine Sprachvariante) > Substring; dann Größe.
+    // Ranking: Wortanfang (Name ODER irgendeine Sprachvariante) > Substring; bei Gleichstand
+    // (z.B. cities500-Kollisionen wie "München" vs. "Münchenroda", beide Wortanfang) explizit
+    // nach Einwohnerzahl absteigend — nicht auf DB-orderBy + Sort-Stabilität allein verlassen.
     const rank = (c: { name: string; search: string }) =>
       c.name.toLowerCase().startsWith(term) || c.search.startsWith(term) || c.search.includes(`,${term}`)
         ? 0
         : 1;
     return raw
-      .sort((a, b) => rank(a) - rank(b))
+      .sort((a, b) => rank(a) - rank(b) || b.population - a.population)
       .slice(0, 8)
       .map(({ name, country, lat, lon }) => ({ name, country, lat, lon }));
   });

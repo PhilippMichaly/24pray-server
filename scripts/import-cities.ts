@@ -1,13 +1,19 @@
 /**
- * Importiert GeoNames cities15000 (CC-BY 4.0, https://download.geonames.org/export/dump/)
+ * Importiert GeoNames cities500 (CC-BY 4.0, https://download.geonames.org/export/dump/)
  * in die City-Tabelle — Basis fürs Orts-Autocomplete (W3.6).
+ * cities500 = alle Orte ≥ 500 EW (statt nur ≥ 15.000 wie cities15000), damit auch
+ * Dörfer wie „Petershausen" (Bayern, ~7.000 EW) auffindbar sind.
  *
- *   curl -sL -o /tmp/cities15000.zip https://download.geonames.org/export/dump/cities15000.zip
- *   unzip -o /tmp/cities15000.zip -d /tmp
- *   npm run import:cities -- /tmp/cities15000.txt
+ *   curl -sL -o /tmp/cities500.zip https://download.geonames.org/export/dump/cities500.zip
+ *   unzip -o /tmp/cities500.zip -d /tmp
+ *   npm run import:cities -- /tmp/cities500.txt
  *
- * Spalten (TSV): 0 geonameid · 1 name · 2 asciiname · 3 alternatenames ·
- * 4 lat · 5 lon · 8 country · 14 population
+ * Spalten (TSV, identisch zu cities15000): 0 geonameid · 1 name · 2 asciiname ·
+ * 3 alternatenames · 4 lat · 5 lon · 8 country · 14 population
+ *
+ * Re-Import ersetzt die Tabelle komplett (idempotent) — delete+insert laufen in EINER
+ * Transaktion, damit bei ~235k Zeilen kein inkonsistenter Zwischenzustand sichtbar wird
+ * und SQLite nicht pro Chunk fsynct (das drückte die Laufzeit von ~31s auf ~13s).
  */
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -16,7 +22,7 @@ import { createPrisma } from '../src/db.js';
 async function main() {
   const file = process.argv[2];
   if (!file) {
-    console.error('Usage: import-cities <pfad/zu/cities15000.txt>');
+    console.error('Usage: import-cities <pfad/zu/cities500.txt>');
     process.exit(1);
   }
   const prisma = createPrisma(process.env.DATABASE_URL);
@@ -42,11 +48,13 @@ async function main() {
   }
 
   console.log(`${rows.length} Städte geparst — importiere …`);
-  await prisma.city.deleteMany();
-  const CHUNK = 1000;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    await prisma.city.createMany({ data: rows.slice(i, i + CHUNK) });
-  }
+  const CHUNK = 5000;
+  await prisma.$transaction(async (tx) => {
+    await tx.city.deleteMany();
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      await tx.city.createMany({ data: rows.slice(i, i + CHUNK) });
+    }
+  }, { timeout: 120_000 });
   const n = await prisma.city.count();
   console.log(`Fertig: ${n} Städte in der City-Tabelle.`);
   await prisma.$disconnect();
