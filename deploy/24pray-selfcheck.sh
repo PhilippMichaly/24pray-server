@@ -3,7 +3,7 @@
 # Mailt NUR bei Zustandswechsel (Problem neu / Problem behoben) über den
 # lokalen Strato-SMTP (Zugang aus /etc/24pray-api.env, SMTP_URL).
 set -u
-RECIPIENT="mflip2@gmx.de"
+RECIPIENT="philipp@michaly.de"
 STATE=/var/lib/24pray-selfcheck.state
 PROBLEMS=()
 
