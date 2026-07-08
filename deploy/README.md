@@ -347,3 +347,26 @@ Neue Prisma-Migrationen laufen beim API-Neustart automatisch (`ExecStartPre`).
 | Root-Passwort | keins im Umlauf (Zufall, Login key-only) | Strato-VNC-Konsole als Fallback |
 | SMTP-Postfach | `/etc/24pray-api.env` (0600, root) | Passwort im Mail-Panel ändern → env anpassen → API restart |
 | Session-/Magic-Tokens | nur gehasht in der DB | — |
+
+## Monitoring (eigene Infra, bewusst getrennt von allem anderen)
+
+Stand 2026-07-08. Zwei Bausteine, beide ohne Dritt-Dienste:
+
+1. **VPS-Selbstcheck** — `deploy/24pray-selfcheck.sh` (deployt nach
+   `/usr/local/sbin/24pray-selfcheck.sh`, systemd-Timer `24pray-selfcheck.timer`,
+   alle 15 min): prüft Dienste (24pray-api/-web/nginx), Disk ≥85 %,
+   TLS-Restlaufzeit <14 Tage, „Backup von heute vorhanden", SQLite `quick_check`,
+   API-Antwort. Alarm-Mail über den eigenen Strato-SMTP (Zugang wird zur Laufzeit
+   aus `/etc/24pray-api.env` gelesen) an `RECIPIENT` (im Skript) — nur bei
+   Zustandswechsel (Problem neu/behoben), State in `/var/lib/24pray-selfcheck.state`.
+   **Falle:** Strato-SMTP verlangt CRLF-Zeilenenden — daher das `sed 's/$/\r/'`
+   vor curl. Test: Skriptkopie mit erzwungenem `PROBLEMS`-Eintrag laufen lassen.
+
+2. **Externer Uptime-Check** (Totalausfall-Erkennung): geplant als
+   GitHub-Actions-Cron in diesem Repo (`.github/workflows/uptime.yml`) — pusht
+   erst, wenn der gh-Token den `workflow`-Scope hat
+   (`gh auth refresh -h github.com -s workflow`).
+
+Grundsatz: Selbstcheck erkennt alles außer „Server komplett weg"; dafür ist der
+externe Cron zuständig. Kein Prometheus/Grafana auf dem VPS (RAM, Wartungsfläche,
+blinder Fleck bei Totalausfall).
