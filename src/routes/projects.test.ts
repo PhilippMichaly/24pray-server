@@ -76,6 +76,57 @@ describe('projects', () => {
     expect(list.find((p: { id: string }) => p.id === empty.id).totalSlots).toBe(3);
   });
 
+  it('Gruppen-Links: gültige Dienst-URLs werden gespeichert und ausgeliefert', async () => {
+    const eva = await loginAs('eva-links@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: eva },
+      payload: {
+        title: 'Kette mit Gruppen', startDate: future(1), endDate: future(4), visibility: 'PUBLIC',
+        linkWhatsapp: 'https://chat.whatsapp.com/AbC123xyz',
+        linkTelegram: 'https://t.me/+abcDEF123',
+        linkSignal: 'https://signal.group/#CjQKIabc',
+      },
+    });
+    expect(create.statusCode).toBe(200);
+    const anon = await app.inject({ method: 'GET', url: `/projects/${create.json().id}` });
+    expect(anon.json().linkWhatsapp).toBe('https://chat.whatsapp.com/AbC123xyz');
+    expect(anon.json().linkTelegram).toBe('https://t.me/+abcDEF123');
+    expect(anon.json().linkSignal).toBe('https://signal.group/#CjQKIabc');
+  });
+
+  it('Gruppen-Links: fremde Domains und http werden abgelehnt (Anti-Phishing)', async () => {
+    const eva = await loginAs('eva-links2@example.com');
+    const bad = async (payload: Record<string, string>) => (await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: eva },
+      payload: { title: 'X', startDate: future(1), endDate: future(4), ...payload },
+    })).statusCode;
+    expect(await bad({ linkWhatsapp: 'https://evil.example.com/AbC' })).toBe(400);
+    expect(await bad({ linkWhatsapp: 'http://chat.whatsapp.com/AbC' })).toBe(400);
+    expect(await bad({ linkTelegram: 'https://t.me.evil.com/x' })).toBe(400);
+    expect(await bad({ linkSignal: 'https://signal.group.phish.io/#x' })).toBe(400);
+  });
+
+  it('Gruppen-Links: PATCH setzt und löscht (null)', async () => {
+    const eva = await loginAs('eva-links3@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: eva },
+      payload: { title: 'PatchLinks', startDate: future(1), endDate: future(4) },
+    });
+    const id = create.json().id;
+    const set = await app.inject({
+      method: 'PATCH', url: `/projects/${id}`, cookies: { session: eva },
+      payload: { linkTelegram: 'https://t.me/meinekette' },
+    });
+    expect(set.statusCode).toBe(200);
+    expect(set.json().linkTelegram).toBe('https://t.me/meinekette');
+    const clear = await app.inject({
+      method: 'PATCH', url: `/projects/${id}`, cookies: { session: eva },
+      payload: { linkTelegram: null },
+    });
+    expect(clear.statusCode).toBe(200);
+    expect(clear.json().linkTelegram).toBe(null);
+  });
+
   it('organizerName: Default Klartext auch anonym; maskiert nur bei maskNames-Opt-in', async () => {
     const carol = await loginAs('carol@example.com');
     const create = await app.inject({

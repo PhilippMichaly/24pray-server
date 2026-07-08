@@ -12,6 +12,9 @@ export interface ProjectWithStats {
   timezone: string;
   slotDurationMinutes: number;
   maskNames: boolean;
+  linkWhatsapp: string | null;
+  linkTelegram: string | null;
+  linkSignal: string | null;
   locationName: string | null;
   inviteToken: string;
   organizerId: string;
@@ -72,6 +75,9 @@ export async function toProjectWithStats(
     timezone: project.timezone,
     slotDurationMinutes: project.slotDurationMinutes,
     maskNames: project.maskNames,
+    linkWhatsapp: project.linkWhatsapp,
+    linkTelegram: project.linkTelegram,
+    linkSignal: project.linkSignal,
     locationName: project.locationName,
     inviteToken: project.organizerId === requesterId ? project.inviteToken : '',
     organizerId: project.organizerId,

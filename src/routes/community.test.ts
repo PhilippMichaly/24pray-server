@@ -82,17 +82,23 @@ describe('W3 — Anliegen-Feed', () => {
       payload: { title: 'FeedTest', startDate: at(0), endDate: at(6), visibility: 'PUBLIC' },
     });
     const id = res.json().id;
-    // User-Post (Name aus Session), Gast-Post (Name Pflicht)
+    // Eine Kette = ein Anliegen des Erstellers: NUR der Owner postet Updates (2026-07-08).
     await db.prisma.user.update({ where: { email: 'w3-req@example.com' }, data: { name: 'Ruth Klein' } });
     const p1 = await app.inject({
       method: 'POST', url: `/projects/${id}/requests`, cookies: { session: owner },
       payload: { text: 'Bitte betet für Lena.' },
     });
     expect(p1.statusCode).toBe(200);
-    const pGuestNoName = await app.inject({
-      method: 'POST', url: `/projects/${id}/requests`, payload: { text: 'Ich bete mit.' },
+    const guest = await app.inject({
+      method: 'POST', url: `/projects/${id}/requests`, payload: { text: 'Ich bete mit.', authorName: 'Gast G' },
     });
-    expect(pGuestNoName.statusCode).toBe(400);
+    expect(guest.statusCode).toBe(403); // Gast darf nur Slots buchen
+    const otherUser = await loginAs('w3-other@example.com');
+    const foreign = await app.inject({
+      method: 'POST', url: `/projects/${id}/requests`, cookies: { session: otherUser },
+      payload: { text: 'Auch von mir.' },
+    });
+    expect(foreign.statusCode).toBe(403); // eingeloggt ≠ Owner → ebenfalls nur Slots
 
     const anon = await app.inject({ method: 'GET', url: `/projects/${id}/requests` });
     expect(anon.json()[0].authorName).toBe('Ruth Klein'); // Default: Klartext auch anonym

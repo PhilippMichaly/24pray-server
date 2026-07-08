@@ -56,10 +56,14 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
     const project = await loadProjectChecked(req);
     const body = CreateRequestBody.parse(req.body);
     const user = req.user;
-    const authorName = user?.name ?? body.authorName;
-    if (!authorName) throw httpError(400, 'Name erforderlich');
+    // Eine Kette = EIN Anliegen des Erstellers: nur der Owner postet Updates dazu;
+    // alle anderen (Gäste wie Eingeloggte) tragen ausschließlich Gebetsstunden bei.
+    if (!user || user.id !== project.organizerId) {
+      throw httpError(403, 'Nur die Erstellerin/der Ersteller der Kette kann Updates posten');
+    }
+    const authorName = user.name;
     const created = await prisma.prayerRequest.create({
-      data: { projectId: project.id, authorId: user?.id ?? null, authorName, text: body.text },
+      data: { projectId: project.id, authorId: user.id, authorName, text: body.text },
     });
     return { id: created.id, authorName, text: created.text, createdAt: created.createdAt.toISOString() };
   });
