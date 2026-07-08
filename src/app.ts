@@ -10,6 +10,7 @@ import { registerAuth } from './plugins/auth.js';
 import { authRoutes } from './routes/auth.js';
 import { projectRoutes } from './routes/projects.js';
 import { slotRoutes } from './routes/slots.js';
+import { communityRoutes } from './routes/community.js';
 
 export interface BuildAppDeps {
   prisma: PrismaClient;
@@ -21,9 +22,18 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   const { prisma, env } = deps;
   const mailer = deps.mailer ?? createMailer({ smtpUrl: env.SMTP_URL, from: env.SMTP_FROM });
 
+  // Lasttest-Fix: WAL entkoppelt Reader von Writern (persistiert in der DB-Datei).
+  try {
+    await prisma.$queryRawUnsafe('PRAGMA journal_mode=WAL');
+  } catch {
+    /* z.B. read-only FS — App soll trotzdem starten */
+  }
+
   const app = Fastify({ logger: false });
 
-  await app.register(cors, { origin: env.APP_URL, credentials: true });
+  // APP_URL immer erlaubt; CORS_ORIGINS fügt weitere Frontend-Origins hinzu (§6.5).
+  const corsOrigins = [env.APP_URL, ...env.CORS_ORIGINS];
+  await app.register(cors, { origin: corsOrigins, credentials: true });
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
 
@@ -39,7 +49,8 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   app.get('/health', async () => ({ ok: true }));
   authRoutes(app, { prisma, mailer, env });
   projectRoutes(app, { prisma });
-  slotRoutes(app, { prisma });
+  slotRoutes(app, { prisma, mailer, env });
+  communityRoutes(app, { prisma, env });
 
   return app;
 }

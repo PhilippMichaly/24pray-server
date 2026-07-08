@@ -3,7 +3,8 @@ import type { PrismaClient } from '@prisma/client';
 import { generateToken } from '../lib/tokens.js';
 import { requireUser } from '../plugins/auth.js';
 import { CreateProjectBody, UpdateProjectBody } from '../schemas/projects.js';
-import { toProjectWithStats } from '../lib/projectView.js';
+import { toProjectWithStats, toProjectListWithStats } from '../lib/projectView.js';
+import { canReadProject, ensureMembership } from '../lib/access.js';
 
 function httpError(status: number, message: string) {
   const e = new Error(message) as Error & { statusCode?: number };
@@ -24,7 +25,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
       include: { organizer: true },
       orderBy: { createdAt: 'desc' },
     });
-    return Promise.all(projects.map((p) => toProjectWithStats(prisma, p, req.user?.id)));
+    return toProjectListWithStats(prisma, projects, req.user?.id);
   });
 
   // Create
@@ -41,22 +42,29 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
         startDate: new Date(body.startDate),
         endDate: new Date(body.endDate),
         timezone: body.timezone,
+        slotDurationMinutes: body.slotDurationMinutes,
         visibility: body.visibility,
+        maskNames: body.maskNames,
+        locationName: body.locationName ?? null,
+        locationLat: body.locationLat ?? null,
+        locationLon: body.locationLon ?? null,
         status: 'ACTIVE',
         inviteToken: generateToken(),
         organizerId: user.id,
       },
       include: { organizer: true },
     });
+    await ensureMembership(prisma, user.id, project.id, 'ORGANIZER'); // W3.2
     return toProjectWithStats(prisma, project, user.id);
   });
 
-  // Get one
+  // Get one (PRIVATE: Organizer, Mitglied oder ?invite=<token> — W3-Gap-Fix)
   app.get('/projects/:id', async (req) => {
     const { id } = req.params as { id: string };
+    const { invite } = (req.query ?? {}) as { invite?: string };
     const project = await prisma.prayerProject.findUnique({ where: { id }, include: { organizer: true } });
     if (!project) throw httpError(404, 'Projekt nicht gefunden');
-    if (project.visibility === 'PRIVATE' && req.user?.id !== project.organizerId) {
+    if (!(await canReadProject(prisma, project, req.user, invite))) {
       throw httpError(403, 'Kein Zugriff auf dieses Projekt');
     }
     return toProjectWithStats(prisma, project, req.user?.id);
@@ -77,9 +85,13 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
         ...(body.description !== undefined ? { description: body.description } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.visibility !== undefined ? { visibility: body.visibility } : {}),
+        ...(body.maskNames !== undefined ? { maskNames: body.maskNames } : {}),
         ...(body.startDate !== undefined ? { startDate: new Date(body.startDate) } : {}),
         ...(body.endDate !== undefined ? { endDate: new Date(body.endDate) } : {}),
         ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
+        ...(body.locationName !== undefined ? { locationName: body.locationName } : {}),
+        ...(body.locationLat !== undefined ? { locationLat: body.locationLat } : {}),
+        ...(body.locationLon !== undefined ? { locationLon: body.locationLon } : {}),
       },
       include: { organizer: true },
     });

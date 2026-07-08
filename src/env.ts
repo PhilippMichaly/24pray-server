@@ -6,9 +6,15 @@ const boolish = z
 
 const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
-  APP_URL: z.string().url(),
+  APP_URL: z.string().url(), // Magic-Link-Base UND immer CORS-erlaubte Origin (= Frontend-Host)
+  // Zusätzliche CORS-Origins (Komma-Liste), entkoppelt von APP_URL (§6.5).
+  CORS_ORIGINS: z
+    .string()
+    .default('')
+    .transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean)),
   DATA_DIR: z.string().default('./data'),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  STATS_CACHE_TTL_MS: z.coerce.number().int().min(0).default(30_000), // /stats/public-Cache (Lasttest-Fix); 0 = aus
   COOKIE_SECURE: boolish.default(false),
   SMTP_URL: z.string().optional().default(''),
   SMTP_FROM: z.string().default('24pray <no-reply@24pray.local>'),

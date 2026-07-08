@@ -18,6 +18,10 @@ model User {
   slots          PrayerSlot[]
   magicTokens    MagicToken[]
   sessions       Session[]
+  memberships    Membership[]
+  recurring      RecurringCommitment[]
+  requests       PrayerRequest[]
+  reminderPref   ReminderPreference?
 }
 
 model PrayerProject {
@@ -29,11 +33,20 @@ model PrayerProject {
   startDate   DateTime
   endDate     DateTime
   timezone    String       @default("Europe/Berlin")
+  slotDurationMinutes Int    @default(60) // Schrittweite des Slot-Grids (§6.2)
+  maskNames   Boolean      @default(false) // Opt-in: Namen für Anonyme maskieren (§E5-Revision 2026-07-08)
+  // Optionaler Standort (W3.4, Landing-Globus): grobe Stadt-Koordinate, freiwillig
+  locationName String?
+  locationLat  Float?
+  locationLon  Float?
   inviteToken String       @unique
   organizerId String
   organizer   User         @relation("OrganizerProjects", fields: [organizerId], references: [id])
   createdAt   DateTime     @default(now())
   slots       PrayerSlot[]
+  memberships Membership[]
+  recurring   RecurringCommitment[]
+  requests    PrayerRequest[]
 }
 
 model PrayerSlot {
@@ -47,14 +60,70 @@ model PrayerSlot {
   status        String        @default("BOOKED") // BOOKED | COMPLETED | CANCELLED
   guestName     String?
   guestEmail    String?
+  guestToken    String?       @unique // Secret für Gast-Selbst-Storno (§6.3)
   notifyChannel String        @default("EMAIL") // EMAIL | TELEGRAM
+  remindedAt    DateTime?     // Reminder-Job: wann die Erinnerung rausging (W3.2)
+  // Optionaler Beter-Standort (W3.5, Nerven-Netz auf dem Globus): NUR Koordinaten,
+  // bewusst ohne Ortsnamen — öffentlich sichtbar ist nie mehr als ein Lichtpunkt.
+  locationLat   Float?
+  locationLon   Float?
+  recurringId   String?
+  recurring     RecurringCommitment? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
 
   @@index([projectId, startTime])
+  @@index([status, startTime]) // Reminder-/Completion-Job-Scans
+}
+
+// ── Welle 3 (W3.2) ─────────────────────────────
+
+model Membership {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  projectId String
+  project   PrayerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role      String        @default("MEMBER") // MEMBER | ORGANIZER
+  createdAt DateTime      @default(now())
+
+  @@unique([userId, projectId])
+}
+
+model RecurringCommitment {
+  id        String        @id @default(cuid())
+  projectId String
+  project   PrayerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id])
+  createdAt DateTime      @default(now())
+  slots     PrayerSlot[]
+}
+
+model PrayerRequest {
+  id         String        @id @default(cuid())
+  projectId  String
+  project    PrayerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  authorId   String?
+  author     User?         @relation(fields: [authorId], references: [id])
+  authorName String
+  text       String
+  createdAt  DateTime      @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+model ReminderPreference {
+  id            String @id @default(cuid())
+  userId        String @unique
+  user          User   @relation(fields: [userId], references: [id])
+  channel       String @default("EMAIL") // EMAIL | TELEGRAM (Modell vorhanden, Versand: EMAIL)
+  minutesBefore Int    @default(60)
 }
 
 model MagicToken {
   id        String    @id @default(cuid())
   token     String    @unique
+  code      String?   // 6-stelliger Login-Code (gehasht) — Alternative zum Link für andere Geräte
+  codeAttempts Int    @default(0) // Brute-Force-Bremse: nach 5 Fehlversuchen gesperrt
   userId    String
   user      User      @relation(fields: [userId], references: [id])
   expiresAt DateTime
@@ -69,4 +138,18 @@ model Session {
   user      User     @relation(fields: [userId], references: [id])
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+// GeoNames cities15000 (CC-BY 4.0, geonames.org) — Geocoding für Ketten-/Beter-Orte (W3.6).
+// `search` = lowercase-Blob aus Name + ASCII + allen Sprachvarianten (München findet Munich).
+model City {
+  id         Int    @id // geonameid
+  name       String
+  country    String
+  lat        Float
+  lon        Float
+  population Int
+  search     String
+
+  @@index([population])
 }
