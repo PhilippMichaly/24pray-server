@@ -1,4 +1,5 @@
 import type { PrismaClient, PrayerProject } from '@prisma/client';
+import { maskName } from './slotGrid.js';
 
 export interface ProjectWithStats {
   id: string;
@@ -52,6 +53,7 @@ export async function toProjectWithStats(
     createdAt: project.createdAt.toISOString(),
     totalSlots,
     bookedSlots,
-    organizerName,
+    // Anonyme Betrachter sehen den Organisator maskiert (§E5) — wie im Slot-Grid.
+    organizerName: requesterId ? organizerName : maskName(organizerName) ?? '',
   };
 }

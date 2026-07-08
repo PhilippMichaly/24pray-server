@@ -56,6 +56,23 @@ describe('projects', () => {
     expect(direct.statusCode).toBe(403);
   });
 
+  it('organizerName ist für anonyme Betrachter maskiert (§E5, F1)', async () => {
+    const carol = await loginAs('carol@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: carol },
+      payload: { title: 'Offene Kette E5', startDate: future(1), endDate: future(4), visibility: 'PUBLIC' },
+    });
+    const proj = create.json();
+    expect(proj.organizerName).toBe('carol'); // eigene Sicht: voll
+
+    const anonList = await app.inject({ method: 'GET', url: '/projects' });
+    const listed = anonList.json().find((p: { id: string }) => p.id === proj.id);
+    expect(listed.organizerName).toBe('ca…'); // anonym: maskiert
+
+    const anonGet = await app.inject({ method: 'GET', url: `/projects/${proj.id}` });
+    expect(anonGet.json().organizerName).toBe('ca…');
+  });
+
   it('inviteToken only leaks to the organizer', async () => {
     const alice = await loginAs('alice-token@example.com');
     const create = await app.inject({
