@@ -181,6 +181,22 @@ describe('projects', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('wb-notifyOnBooking: Default true, PATCH kann es umschalten', async () => {
+    const finn = await loginAs('wb-notify@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: finn },
+      payload: { title: 'wb-NotifyDefault', startDate: future(1), endDate: future(4), visibility: 'PUBLIC' },
+    });
+    expect(create.json().notifyOnBooking).toBe(true);
+
+    const off = await app.inject({
+      method: 'PATCH', url: `/projects/${create.json().id}`, cookies: { session: finn },
+      payload: { notifyOnBooking: false },
+    });
+    expect(off.statusCode).toBe(200);
+    expect(off.json().notifyOnBooking).toBe(false);
+  });
+
   it('join by invite token returns the project', async () => {
     const alice = await loginAs('alice2@example.com');
     const create = await app.inject({

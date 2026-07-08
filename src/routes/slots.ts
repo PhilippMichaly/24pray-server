@@ -65,7 +65,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
   app.post('/projects/:id/slots', async (req) => {
     const { id } = req.params as { id: string };
     const body = BookSlotBody.parse(req.body);
-    const project = await prisma.prayerProject.findUnique({ where: { id } });
+    const project = await prisma.prayerProject.findUnique({ where: { id }, include: { organizer: true } });
     if (!project) throw httpError(404, 'Projekt nicht gefunden');
 
     const startTime = new Date(body.startTime);
@@ -118,6 +118,19 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         icsUrl: `${env.APP_URL}/api/slots/${slot.id}/ics`,
         googleUrl: googleCalendarUrl(ev),
       }).catch((err) => console.error(`[mail] booking confirmation failed for slot ${slot.id}:`, err));
+    }
+
+    // Owner-Benachrichtigung (Punkt 10): nur bei Fremd-/Gastbuchung, Opt-out per Flag.
+    // maskNames hat hier KEINEN Einfluss — der Owner sieht immer Klartext.
+    if (project.notifyOnBooking && userId !== project.organizerId && mailer?.sendBookingNotice) {
+      const bookerName = req.user?.name ?? body.guestName ?? '';
+      mailer.sendBookingNotice(project.organizer.email, {
+        projectTitle: project.title,
+        bookerName,
+        startTime: slot.startTime.toISOString(),
+        endTime: slot.endTime.toISOString(),
+        timezone: project.timezone,
+      }).catch((err) => console.error(`[mail] booking notice failed for slot ${slot.id}:`, err));
     }
     return slot;
   });

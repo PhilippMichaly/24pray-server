@@ -35,6 +35,7 @@ model PrayerProject {
   timezone    String       @default("Europe/Berlin")
   slotDurationMinutes Int    @default(60) // Schrittweite des Slot-Grids (§6.2)
   maskNames   Boolean      @default(false) // Opt-in: Namen für Anonyme maskieren (§E5-Revision 2026-07-08)
+  notifyOnBooking Boolean  @default(true) // Owner per Mail benachrichtigen, wenn jemand eine Stunde bucht (Punkt 10)
   // Parallele Kommunikation (Owner-gepflegt, nur validierte Dienst-URLs)
   linkWhatsapp String?
   linkTelegram String?

@@ -67,7 +67,25 @@ export async function sendDueReminders(
   return sent;
 }
 
-/** Startet beide Jobs im Intervall (server.ts). Gibt eine stop()-Funktion zurück. */
+const MAGIC_TOKEN_GRACE_MS = 60 * 60_000; // 1h Kulanzfenster nach Ablauf (Punkt 11)
+
+/**
+ * Aufräum-Job (Punkt 11): löscht abgelaufene Sessions sofort und abgelaufene
+ * MagicTokens erst nach einer Kulanzstunde (spätes Klicken auf einen fast
+ * abgelaufenen Link soll nicht durch den Job selbst kaputtgehen).
+ */
+export async function cleanupExpired(
+  prisma: PrismaClient,
+  now = new Date(),
+): Promise<{ sessions: number; magicTokens: number }> {
+  const sessions = await prisma.session.deleteMany({ where: { expiresAt: { lt: now } } });
+  const magicTokens = await prisma.magicToken.deleteMany({
+    where: { expiresAt: { lt: new Date(now.getTime() - MAGIC_TOKEN_GRACE_MS) } },
+  });
+  return { sessions: sessions.count, magicTokens: magicTokens.count };
+}
+
+/** Startet alle Jobs im Intervall (server.ts). Gibt eine stop()-Funktion zurück. */
 export function startJobs(
   deps: { prisma: PrismaClient; mailer: Mailer; appUrl?: string },
   intervalMs = 60_000,
@@ -79,6 +97,7 @@ export function startJobs(
     try {
       await completeElapsedSlots(deps.prisma);
       await sendDueReminders(deps.prisma, deps.mailer, new Date(), deps.appUrl);
+      await cleanupExpired(deps.prisma);
     } catch (err) {
       console.error('[jobs] tick failed:', err);
     } finally {

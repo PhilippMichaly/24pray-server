@@ -8,6 +8,7 @@ let db: TestDb;
 let app: FastifyInstance;
 const captured: { email: string; url: string }[] = [];
 const bookingMails: { email: string; m: import('../lib/mailer.js').BookingMail }[] = [];
+const bookingNotices: { email: string; m: import('../lib/mailer.js').BookingNoticeMail }[] = [];
 
 let loginSeq = 0;
 async function loginAs(email: string): Promise<string> {
@@ -28,6 +29,7 @@ beforeAll(async () => {
     mailer: {
       async sendMagicLink(email, url) { captured.push({ email, url }); },
       async sendBookingConfirmation(email, m) { bookingMails.push({ email, m }); },
+      async sendBookingNotice(email, m) { bookingNotices.push({ email, m }); },
     },
   });
   await app.ready();
@@ -160,6 +162,57 @@ describe('slots', () => {
     expect(mail!.m.projectTitle).toBe('Slots');
     expect(mail!.m.icsUrl).toContain(`/api/slots/${book.json().id}/ics`);
     expect(mail!.m.googleUrl).toContain('calendar.google.com');
+  });
+
+  it('wb-notifyOnBooking: Owner bekommt Mail bei Fremd-/Gastbuchung, nicht bei Eigenbuchung, nicht wenn Flag aus', async () => {
+    const owner = await loginAs('wb-notify-owner@example.com');
+    const other = await loginAs('wb-notify-other@example.com');
+
+    const proj = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'wb-NotifyProjekt', startDate: at(0), endDate: at(20), visibility: 'PUBLIC' },
+    });
+    const pid = proj.json().id;
+
+    // Eigenbuchung des Organisators: KEINE Mail.
+    bookingNotices.length = 0;
+    await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: owner },
+      payload: { startTime: at(1) },
+    });
+    expect(bookingNotices).toHaveLength(0);
+
+    // Fremdbuchung (eingeloggt): Mail an den Organisator.
+    bookingNotices.length = 0;
+    await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: other },
+      payload: { startTime: at(2) },
+    });
+    expect(bookingNotices).toHaveLength(1);
+    expect(bookingNotices[0].email).toBe('wb-notify-owner@example.com');
+    expect(bookingNotices[0].m.projectTitle).toBe('wb-NotifyProjekt');
+    expect(bookingNotices[0].m.bookerName).toBe('wb-notify-other');
+
+    // Gastbuchung: ebenfalls Mail an den Organisator.
+    bookingNotices.length = 0;
+    await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`,
+      payload: { startTime: at(3), guestName: 'wb-Gast Notify' },
+    });
+    expect(bookingNotices).toHaveLength(1);
+    expect(bookingNotices[0].m.bookerName).toBe('wb-Gast Notify');
+
+    // Flag aus: keine Mail mehr, auch bei Fremdbuchung.
+    await app.inject({
+      method: 'PATCH', url: `/projects/${pid}`, cookies: { session: owner },
+      payload: { notifyOnBooking: false },
+    });
+    bookingNotices.length = 0;
+    await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: other },
+      payload: { startTime: at(4) },
+    });
+    expect(bookingNotices).toHaveLength(0);
   });
 
   it('guest booking mints a guestToken; guest can self-cancel with it; foreign token = 403', async () => {

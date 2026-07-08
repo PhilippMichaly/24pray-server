@@ -18,13 +18,23 @@ export interface BookingMail {
   googleUrl: string;
 }
 
+/** Owner-Benachrichtigung bei neuer Buchung in der eigenen Kette (Punkt 10). */
+export interface BookingNoticeMail {
+  projectTitle: string;
+  bookerName: string;
+  startTime: string; // ISO
+  endTime: string; // ISO
+  timezone: string;
+}
+
 export interface Mailer {
   sendMagicLink(email: string, url: string, code?: string): Promise<void>;
   sendReminder?(email: string, reminder: ReminderMail): Promise<void>;
   sendBookingConfirmation?(email: string, booking: BookingMail): Promise<void>;
+  sendBookingNotice?(email: string, notice: BookingNoticeMail): Promise<void>;
 }
 
-function formatReminderTime(r: ReminderMail): string {
+function formatReminderTime(r: { startTime: string; timezone: string }): string {
   return new Intl.DateTimeFormat('de-DE', {
     timeZone: r.timezone,
     weekday: 'long',
@@ -57,6 +67,9 @@ export function createMailer(config: MailerConfig): Mailer {
       },
       async sendBookingConfirmation(email, b) {
         console.log(`[mailer:dev] booking confirmation for ${email}: ${b.projectTitle} (${b.icsUrl})`);
+      },
+      async sendBookingNotice(email, n) {
+        console.log(`[mailer:dev] booking notice for ${email}: ${n.bookerName} @ ${n.projectTitle} (${formatReminderTime(n)})`);
       },
     };
   }
@@ -97,6 +110,16 @@ export function createMailer(config: MailerConfig): Mailer {
         subject: `24pray — deine Gebetsstunde ist eingetragen (${b.projectTitle})`,
         text: `${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „${b.projectTitle}" ist eingetragen: ${when} (${b.timezone}).${cal.text}`,
         html: `<p>${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „<strong>${b.projectTitle}</strong>" ist eingetragen: <strong>${when}</strong> (${b.timezone}).</p>${cal.html}`,
+      });
+    },
+    async sendBookingNotice(email, n) {
+      const when = formatReminderTime(n);
+      await transport.sendMail({
+        from: config.from,
+        to: email,
+        subject: `24pray — neue Stunde in deiner Kette (${n.projectTitle})`,
+        text: `${n.bookerName} hat eine Stunde in „${n.projectTitle}" übernommen: ${when} (${n.timezone}).`,
+        html: `<p><strong>${n.bookerName}</strong> hat eine Stunde in „<strong>${n.projectTitle}</strong>" übernommen: <strong>${when}</strong> (${n.timezone}).</p>`,
       });
     },
   };
