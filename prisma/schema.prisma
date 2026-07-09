@@ -13,6 +13,7 @@ model User {
   name           String
   role           String         @default("MEMBER") // MEMBER | ORGANIZER | ADMIN
   telegramChatId String?
+  locale         String         @default("de") // UI-Sprache (de|en|es|he|ar) für lokalisierte Mails; bei jedem Login aktualisiert (Backlog 1)
   createdAt      DateTime       @default(now())
   projects       PrayerProject[] @relation("OrganizerProjects")
   slots          PrayerSlot[]
@@ -52,6 +53,7 @@ model PrayerProject {
   memberships Membership[]
   recurring   RecurringCommitment[]
   requests    PrayerRequest[]
+  updateOptOuts UpdateOptOut[]
 }
 
 model PrayerSlot {
@@ -67,6 +69,7 @@ model PrayerSlot {
   guestEmail    String?
   guestToken    String?       @unique // Secret für Gast-Selbst-Storno (§6.3)
   notifyChannel String        @default("EMAIL") // EMAIL | TELEGRAM
+  locale        String        @default("de") // UI-Sprache des Buchenden (Gast-Fallback für Update-Mails, Backlog 1)
   remindedAt    DateTime?     // Reminder-Job: wann die Erinnerung rausging (W3.2)
   // Optionaler Beter-Standort (W3.5, Nerven-Netz auf dem Globus): NUR Koordinaten,
   // bewusst ohne Ortsnamen — öffentlich sichtbar ist nie mehr als ein Lichtpunkt.
@@ -114,6 +117,18 @@ model PrayerRequest {
   createdAt  DateTime      @default(now())
 
   @@index([projectId, createdAt])
+}
+
+// Update-Mail-Opt-out (Backlog 1): Empfänger (User ODER Gast — nur E-Mail bekannt) hat sich
+// per signiertem Abmelde-Link von den Update-Mails EINER Wache abgemeldet. E-Mail lowercased.
+model UpdateOptOut {
+  id        String        @id @default(cuid())
+  projectId String
+  project   PrayerProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  email     String
+  createdAt DateTime      @default(now())
+
+  @@unique([projectId, email])
 }
 
 model ReminderPreference {
