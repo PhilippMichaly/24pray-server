@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { parseEnv } from '../env.js';
@@ -293,5 +293,25 @@ describe('Backlog 1 — Locale-Erfassung bei Buchung', () => {
     });
     const s2 = await db.prisma.prayerSlot.findUniqueOrThrow({ where: { id: b2.json().id } });
     expect(s2.locale).toBe('de');
+  });
+});
+
+describe('Backlog 4 — Bestätigungsmail trägt projectUrl', () => {
+  it('Gastbuchung mit E-Mail: BookingMail enthält projectUrl der Wache', async () => {
+    const owner = await loginAs('un4-mail-owner@example.com');
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un4 MailTest', startDate: at(0), endDate: at(6), visibility: 'PUBLIC' },
+    });
+    const id = res.json().id;
+    await app.inject({
+      method: 'POST', url: `/projects/${id}/slots`,
+      payload: { startTime: at(2), guestName: 'Gast', guestEmail: 'un4-guest@example.com' },
+    });
+    await vi.waitFor(() => {
+      const hit = bookingMails.find((b) => b.email === 'un4-guest@example.com');
+      expect(hit).toBeTruthy();
+      expect(hit!.m.projectUrl).toContain(`/projects/${id}`);
+    });
   });
 });

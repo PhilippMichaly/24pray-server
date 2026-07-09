@@ -125,6 +125,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         icsUrl: `${env.APP_URL}/api/slots/${slot.id}/ics`,
         googleUrl: googleCalendarUrl(ev),
         isAllDay: project.slotDurationMinutes === 1440,
+        projectUrl: `${env.APP_URL}/projects/${project.id}${project.visibility === 'PRIVATE' ? `?invite=${project.inviteToken}` : ''}`,
       }).catch((err) => console.error(`[mail] booking confirmation failed for slot ${slot.id}:`, err));
     }
 

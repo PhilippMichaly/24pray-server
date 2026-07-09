@@ -96,6 +96,20 @@ describe('mailer', () => {
   });
 });
 
+describe('Backlog 4 — Einladungs-Absatz in der Bestätigungsmail', () => {
+  it('Dev-Mailer akzeptiert projectUrl im BookingMail (Typ-/Smoke-Test)', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const mailer = createMailer({ smtpUrl: '', from: 'a@b' });
+    await mailer.sendBookingConfirmation!('un4-x@example.com', {
+      name: 'Maria', projectTitle: 'Wache', startTime: new Date().toISOString(),
+      timezone: 'Europe/Berlin', icsUrl: 'http://x/ics', googleUrl: 'http://x/g',
+      projectUrl: 'https://24pray.org/projects/p1',
+    });
+    expect(spy.mock.calls.flat().join(' ')).toContain('un4-x@example.com');
+    spy.mockRestore();
+  });
+});
+
 describe('sendUpdateNotice (Backlog 1)', () => {
   it('Dev-Mailer loggt Empfänger, Titel und Locale', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});

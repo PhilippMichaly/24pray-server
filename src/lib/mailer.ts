@@ -18,6 +18,7 @@ export interface BookingMail {
   icsUrl: string;
   googleUrl: string;
   isAllDay?: boolean;
+  projectUrl?: string; // Einladungs-Moment (Backlog 4): Link auf die Wache (PRIVATE: mit ?invite=)
 }
 
 /** Owner-Benachrichtigung bei neuer Buchung in der eigenen Kette (Punkt 10). */
@@ -185,12 +186,18 @@ export function createMailer(config: MailerConfig): Mailer {
     async sendBookingConfirmation(email, b) {
       const when = formatReminderTime(b);
       const cal = calendarBlock(b.googleUrl, b.icsUrl);
+      const invite = b.projectUrl
+        ? {
+            text: `\n\nLade jemanden ein, die Stunde neben dir zu übernehmen: ${b.projectUrl}`,
+            html: `<p>Lade jemanden ein, die Stunde neben dir zu übernehmen: <a href="${b.projectUrl}">${b.projectUrl}</a></p>`,
+          }
+        : { text: '', html: '' };
       await transport.sendMail({
         from: config.from,
         to: email,
         subject: `24pray — deine Gebetsstunde ist eingetragen (${b.projectTitle})`,
-        text: `${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „${b.projectTitle}" ist eingetragen: ${when} (${b.timezone}).${cal.text}`,
-        html: `<p>${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „<strong>${b.projectTitle}</strong>" ist eingetragen: <strong>${when}</strong> (${b.timezone}).</p>${cal.html}`,
+        text: `${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „${b.projectTitle}" ist eingetragen: ${when} (${b.timezone}).${cal.text}${invite.text}`,
+        html: `<p>${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „<strong>${b.projectTitle}</strong>" ist eingetragen: <strong>${when}</strong> (${b.timezone}).</p>${cal.html}${invite.html}`,
       });
     },
     async sendBookingNotice(email, n) {
