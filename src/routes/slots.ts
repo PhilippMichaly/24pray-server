@@ -125,6 +125,10 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         icsUrl: `${env.APP_URL}/api/slots/${slot.id}/ics`,
         googleUrl: googleCalendarUrl(ev),
         isAllDay: project.slotDurationMinutes === 1440,
+        // Bewusster Trade-off (Review Backlog-4 F2): Der Gast-Bucher bekommt bei PRIVATE den echten
+        // inviteToken per Mail — er ist Teilnehmer, Mail-Weiterleitung = Einladung (gleiches Muster
+        // wie die Update-Mails in community.ts). Achtung: POST /slots prüft kein canReadProject
+        // (vorbestehend) — Hardening dazu siehe Backlog-Merkposten.
         projectUrl: `${env.APP_URL}/projects/${project.id}${project.visibility === 'PRIVATE' ? `?invite=${project.inviteToken}` : ''}`,
       }).catch((err) => console.error(`[mail] booking confirmation failed for slot ${slot.id}:`, err));
     }
