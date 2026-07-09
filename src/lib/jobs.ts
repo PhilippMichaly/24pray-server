@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Mailer } from './mailer.js';
 import { googleCalendarUrl } from './calendar.js';
+import { pushToUsers, type PushSender } from './push.js';
 
 /** W3.2: Abgelaufene BOOKED-Slots → COMPLETED (Basis für die Statistik). */
 export async function completeElapsedSlots(prisma: PrismaClient, now = new Date()): Promise<number> {
@@ -21,6 +22,7 @@ export async function sendDueReminders(
   mailer: Mailer,
   now = new Date(),
   appUrl?: string, // für Kalender-Links in der Mail
+  pushSender?: PushSender | null, // Zweitkanal Web-Push (Backlog 7), optional/nullable
 ): Promise<number> {
   const maxLead = 24 * 60; // Obergrenze, damit der Scan begrenzt bleibt
   const candidates = await prisma.prayerSlot.findMany({
@@ -63,6 +65,15 @@ export async function sendDueReminders(
       });
       await prisma.prayerSlot.update({ where: { id: slot.id }, data: { remindedAt: now } });
       sent++;
+
+      // Zweitkanal Web-Push (Backlog 7): nur User-Slots (Gäste haben keine Subscription).
+      if (pushSender && slot.userId) {
+        pushToUsers(prisma, pushSender, [slot.userId], {
+          title: `24pray — ${slot.project.title}`,
+          body: 'Deine Gebetsstunde beginnt bald.',
+          url: appUrl ? `${appUrl}/projects/${slot.projectId}` : `/projects/${slot.projectId}`,
+        }).catch((err) => console.error('[push] reminder push failed:', err));
+      }
     } catch (err) {
       // Nicht markieren → nächster Tick versucht es erneut.
       console.error(`[jobs] reminder failed for slot ${slot.id}:`, err);
@@ -91,7 +102,7 @@ export async function cleanupExpired(
 
 /** Startet alle Jobs im Intervall (server.ts). Gibt eine stop()-Funktion zurück. */
 export function startJobs(
-  deps: { prisma: PrismaClient; mailer: Mailer; appUrl?: string },
+  deps: { prisma: PrismaClient; mailer: Mailer; appUrl?: string; pushSender?: PushSender | null },
   intervalMs = 60_000,
 ): () => void {
   let running = false; // Overlap-Guard: ein langsamer Tick (SMTP!) darf sich nicht stapeln
@@ -100,7 +111,7 @@ export function startJobs(
     running = true;
     try {
       await completeElapsedSlots(deps.prisma);
-      await sendDueReminders(deps.prisma, deps.mailer, new Date(), deps.appUrl);
+      await sendDueReminders(deps.prisma, deps.mailer, new Date(), deps.appUrl, deps.pushSender);
       await cleanupExpired(deps.prisma);
     } catch (err) {
       console.error('[jobs] tick failed:', err);

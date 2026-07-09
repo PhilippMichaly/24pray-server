@@ -6,6 +6,7 @@ import { canReadProject } from '../lib/access.js';
 import { maskName } from '../lib/slotGrid.js';
 import type { Env } from '../env.js';
 import type { Mailer, UpdateNoticeMail } from '../lib/mailer.js';
+import { pushToUsers, type PushSender } from '../lib/push.js';
 import { unsubscribeUrl, verifyUnsubscribeSig } from '../lib/unsubscribe.js';
 import { MailLocale } from '../schemas/auth.js';
 
@@ -68,8 +69,11 @@ const UNSUB_CONFIRM: Record<string, { lang: string; dir: string; title: string; 
   ar: { lang: 'ar', dir: 'rtl', title: 'تم إلغاء الاشتراك', body: 'لن تصلك بعد الآن رسائل التحديثات لسهرة الصلاة هذه.' },
 };
 
-export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env }) {
-  const { prisma, mailer, env } = deps;
+export function communityRoutes(
+  app: FastifyInstance,
+  deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env; pushSender?: PushSender | null },
+) {
+  const { prisma, mailer, env, pushSender } = deps;
   // Lasttest-Fix: Landing-Poll (60s pro offenem Tab) darf nicht mit der Nutzerzahl skalieren.
   let statsCache: { data: unknown; ts: number } | null = null;
 
@@ -135,6 +139,20 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
             locale: r.locale,
           };
           await mail(r.email, notice).catch((err) => console.error(`[mail] update notice failed for ${r.email}:`, err));
+        }
+        // Zweitkanal Web-Push (Backlog 7): Empfänger-E-Mails → User mit Konto → deren Geräte.
+        if (pushSender && recipients.length > 0) {
+          const users = await prisma.user.findMany({
+            where: { email: { in: recipients.map((r) => r.email) } },
+            select: { id: true },
+          });
+          if (users.length > 0) {
+            await pushToUsers(prisma, pushSender, users.map((u) => u.id), {
+              title: `24pray — ${project.title}`,
+              body: body.text,
+              url: projectUrl,
+            }).catch(() => {});
+          }
         }
       })().catch((err) => console.error('[mail] update fan-out failed:', err));
     }

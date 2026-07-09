@@ -4,6 +4,7 @@ import { env } from './env.js';
 import { createPrisma } from './db.js';
 import { buildApp } from './app.js';
 import { createMailer } from './lib/mailer.js';
+import { createPushSender } from './lib/push.js';
 import { startJobs } from './lib/jobs.js';
 
 async function main() {
@@ -11,12 +12,13 @@ async function main() {
   const databaseUrl = `file:${resolve(env.DATA_DIR, '24pray.db')}`;
   const prisma = createPrisma(databaseUrl);
   const mailer = createMailer({ smtpUrl: env.SMTP_URL, from: env.SMTP_FROM });
-  const app = await buildApp({ prisma, env, mailer });
+  const pushSender = createPushSender(env); // Backlog 7: Zweitkanal, einmal erzeugt und wiederverwendet
+  const app = await buildApp({ prisma, env, mailer, pushSender });
 
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
   console.log(`24pray-api listening on :${env.PORT} (APP_URL=${env.APP_URL})`);
   // W3.2: Completion- + Reminder-Job (minütlich)
-  const stopJobs = startJobs({ prisma, mailer, appUrl: env.APP_URL });
+  const stopJobs = startJobs({ prisma, mailer, appUrl: env.APP_URL, pushSender });
 
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received, shutting down…`);

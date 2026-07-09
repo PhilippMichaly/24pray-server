@@ -67,7 +67,7 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   authRoutes(app, { prisma, mailer, env });
   projectRoutes(app, { prisma, mailer, env });
   slotRoutes(app, { prisma, mailer, env });
-  communityRoutes(app, { prisma, mailer, env });
+  communityRoutes(app, { prisma, mailer, env, pushSender });
   meRoutes(app, { prisma });
   funnelRoutes(app, { prisma, env });
   feedbackRoutes(app, { mailer, env });

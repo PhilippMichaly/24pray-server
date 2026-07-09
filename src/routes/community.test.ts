@@ -498,6 +498,43 @@ describe('Backlog 1 — Update-Benachrichtigung', () => {
     expect(updates[0].email).toBe('un1-up-member@example.com');
   });
 
+  it('Backlog 7: Owner-Update pusht an Teilnehmer mit Konto+Subscription (Gäste nicht)', async () => {
+    const { id } = await setupProjectWithParticipants();
+    const memberUser = await db.prisma.user.findUniqueOrThrow({ where: { email: 'un1-up-member@example.com' } });
+    await db.prisma.pushSubscription.create({
+      data: { endpoint: 'https://push.example/un7-community', p256dh: 'k', auth: 'a', userId: memberUser.id },
+    });
+
+    const pushed: { endpoint: string; payload: { title: string; url: string } }[] = [];
+    const fakeSender = async (sub: { endpoint: string }, payload: { title: string; body: string; url: string }) => {
+      pushed.push({ endpoint: sub.endpoint, payload });
+    };
+    const pushApp = await buildApp({
+      prisma: db.prisma,
+      env: parseEnv({ APP_URL: 'http://localhost:3000', STATS_CACHE_TTL_MS: '0' }),
+      mailer: {
+        async sendMagicLink() {},
+        async sendUpdateNotice() {},
+      },
+      pushSender: fakeSender,
+    });
+    await pushApp.ready();
+    try {
+      const owner = await loginAs('un1-up-owner@example.com');
+      const post = await pushApp.inject({
+        method: 'POST', url: `/projects/${id}/requests`, cookies: { session: owner },
+        payload: { text: 'Push-Update!' },
+      });
+      expect(post.statusCode).toBe(200);
+      await vi.waitFor(() => expect(pushed.length).toBe(1));
+      expect(pushed[0].endpoint).toBe('https://push.example/un7-community');
+      expect(pushed[0].payload.title).toContain('un1 UpdateTest');
+      expect(pushed[0].payload.url).toContain(`/projects/${id}`);
+    } finally {
+      await pushApp.close();
+    }
+  });
+
   it('Unsubscribe mit locale=__proto__ (Prototype-Pollution-Probe) wird von zod abgelehnt (400)', async () => {
     const { id } = await setupProjectWithParticipants();
     const { unsubscribeSig } = await import('../lib/unsubscribe.js');
