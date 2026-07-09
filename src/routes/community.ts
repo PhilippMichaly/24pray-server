@@ -147,9 +147,12 @@ export function communityRoutes(
             select: { id: true },
           });
           if (users.length > 0) {
+            // Anriss statt Volltext (Review P7-F1): Notification-Bodys sind kein Lesekanal,
+            // und aes128gcm-Payloads sind auf ~4 KB gedeckelt (1000 Zeichen he/ar+JSON reißen das).
+            const teaser = body.text.length > 300 ? `${body.text.slice(0, 299)}…` : body.text;
             await pushToUsers(prisma, pushSender, users.map((u) => u.id), {
               title: `24pray — ${project.title}`,
-              body: body.text,
+              body: teaser,
               url: projectUrl,
             }).catch(() => {});
           }
