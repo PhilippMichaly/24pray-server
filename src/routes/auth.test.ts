@@ -143,4 +143,16 @@ describe('Backlog 1 — Locale-Erfassung beim Login', () => {
     const u = await db.prisma.user.findUniqueOrThrow({ where: { email: 'un1-default@example.com' } });
     expect(u.locale).toBe('de');
   });
+
+  it('locale-loser Login überschreibt eine bestehende abweichende User-Locale NICHT', async () => {
+    await app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: 'un1-keep@example.com', locale: 'he' }, remoteAddress: '10.9.0.4' });
+    let u = await db.prisma.user.findUniqueOrThrow({ where: { email: 'un1-keep@example.com' } });
+    expect(u.locale).toBe('he');
+
+    await app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: 'un1-keep@example.com' }, remoteAddress: '10.9.0.5' });
+    u = await db.prisma.user.findUniqueOrThrow({ where: { email: 'un1-keep@example.com' } });
+    expect(u.locale).toBe('he');
+  });
 });
