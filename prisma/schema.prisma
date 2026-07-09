@@ -34,7 +34,7 @@ model PrayerProject {
   startDate   DateTime
   endDate     DateTime
   timezone    String       @default("Europe/Berlin")
-  language    String       @default("de") // Sprache der Wache (de|en|es|he|ar) — Listen-Filter (Backlog 5)
+  language    String       @default("de") // UI-Sprache des Erstellers beim Anlegen (de|en|es|he|ar), nachträglich noch nicht änderbar — Listen-Filter (Backlog 5)
   slotDurationMinutes Int    @default(60) // Schrittweite des Slot-Grids (§6.2)
   maskNames   Boolean      @default(false) // Opt-in: Namen für Anonyme maskieren (§E5-Revision 2026-07-08)
   notifyOnBooking Boolean  @default(true) // Owner per Mail benachrichtigen, wenn jemand eine Stunde bucht (Punkt 10)
