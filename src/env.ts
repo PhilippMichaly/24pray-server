@@ -22,6 +22,8 @@ const EnvSchema = z.object({
   UNSUBSCRIBE_SECRET: z.string().default('dev-unsubscribe-secret'),
   // Lese-Token für GET /stats/funnel (Backlog 8). Leer = Lese-Endpoint antwortet 404.
   FUNNEL_TOKEN: z.string().default(''),
+  // Empfänger der Nutzer-Feedback-Mails (User-Zusatzpunkt). Leer = /feedback antwortet 404.
+  FEEDBACK_TO: z.string().default(''),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

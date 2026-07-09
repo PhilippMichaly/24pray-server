@@ -125,3 +125,13 @@ describe('sendUpdateNotice (Backlog 1)', () => {
     spy.mockRestore();
   });
 });
+
+describe('sendFeedback (User-Zusatzpunkt)', () => {
+  it('Dev-Mailer loggt Empfänger', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const mailer = createMailer({ smtpUrl: '', from: 'a@b' });
+    await mailer.sendFeedback!('un9-owner@example.com', { message: 'Testfeedback', replyTo: 'x@y.zz' });
+    expect(spy.mock.calls.flat().join(' ')).toContain('un9-owner@example.com');
+    spy.mockRestore();
+  });
+});

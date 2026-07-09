@@ -66,6 +66,13 @@ export interface UpdateNoticeMail {
   locale: string; // de|en|es|he|ar; Unbekanntes → de
 }
 
+/** Nutzer-Feedback (Footer-Dialog) → Mail an den Betreiber; bewusst KEINE DB-Speicherung. */
+export interface FeedbackMail {
+  message: string; // User-Content — im HTML escapen!
+  replyTo?: string; // optionale Antwort-Adresse des Nutzers
+  page?: string; // Seite, von der das Feedback kam
+}
+
 // Einzige lokalisierte Mail (Entscheidung 2026-07-09): Empfänger-Locale wird seit Backlog 1
 // erfasst; die Alt-Mails bleiben vorerst deutsch (separater Backlog-Punkt).
 // he/ar: Muttersprachler-Review steht noch aus (Backlog-Merkposten).
@@ -96,6 +103,7 @@ export interface Mailer {
   sendScheduleChange?(email: string, change: ScheduleChangeMail): Promise<void>;
   sendProjectFarewell?(email: string, farewell: ProjectFarewellMail): Promise<void>;
   sendUpdateNotice?(email: string, notice: UpdateNoticeMail): Promise<void>;
+  sendFeedback?(to: string, f: FeedbackMail): Promise<void>;
 }
 
 function formatReminderTime(r: { startTime: string; timezone: string; isAllDay?: boolean }): string {
@@ -152,6 +160,9 @@ export function createMailer(config: MailerConfig): Mailer {
       },
       async sendUpdateNotice(email, n) {
         console.log(`[mailer:dev] update notice for ${email}: ${n.projectTitle} (${n.locale})`);
+      },
+      async sendFeedback(to, f) {
+        console.log(`[mailer:dev] feedback for ${to} (replyTo: ${f.replyTo ?? '-'}, page: ${f.page ?? '-'})`);
       },
     };
   }
@@ -249,6 +260,16 @@ export function createMailer(config: MailerConfig): Mailer {
           `<blockquote style="margin:0;padding-inline-start:12px;border-inline-start:3px solid #ccc;white-space:pre-wrap">${escapeHtml(n.text)}</blockquote>` +
           `<p><a href="${n.projectUrl}">${tr.toWatch}</a></p>` +
           `<p style="font-size:12px;color:#888"><a href="${n.unsubscribeUrl}">${tr.unsubscribe}</a></p></div>`,
+      });
+    },
+    async sendFeedback(to, f) {
+      await transport.sendMail({
+        from: config.from,
+        to,
+        ...(f.replyTo ? { replyTo: f.replyTo } : {}),
+        subject: `24pray — Nutzer-Feedback${f.page ? ` (${f.page})` : ''}`,
+        text: `${f.message}\n\n—\nSeite: ${f.page ?? '-'}\nAntwort-Adresse: ${f.replyTo ?? 'keine angegeben'}`,
+        html: `<blockquote style="margin:0;padding-inline-start:12px;border-inline-start:3px solid #ccc;white-space:pre-wrap">${escapeHtml(f.message)}</blockquote><p style="font-size:12px;color:#888">Seite: ${escapeHtml(f.page ?? '-')} · Antwort-Adresse: ${escapeHtml(f.replyTo ?? 'keine angegeben')}</p>`,
       });
     },
   };

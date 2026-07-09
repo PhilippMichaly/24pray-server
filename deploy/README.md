@@ -117,6 +117,8 @@ SMTP_FROM=24pray <no-reply@24pray.org>
 UNSUBSCRIBE_SECRET=
 # Lese-Token fuer GET /stats/funnel (Backlog 8) — lang+zufaellig; leer = Endpoint aus (404)
 FUNNEL_TOKEN=
+# Empfaenger der Nutzer-Feedback-Mails (Footer-Dialog) — leer = Feature aus (404)
+FEEDBACK_TO=
 EOF
 chmod 600 /etc/24pray-api.env'
 ```

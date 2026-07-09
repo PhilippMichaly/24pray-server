@@ -13,6 +13,7 @@ import { slotRoutes } from './routes/slots.js';
 import { communityRoutes } from './routes/community.js';
 import { meRoutes } from './routes/me.js';
 import { funnelRoutes } from './routes/funnel.js';
+import { feedbackRoutes } from './routes/feedback.js';
 
 export interface BuildAppDeps {
   prisma: PrismaClient;
@@ -64,6 +65,7 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   communityRoutes(app, { prisma, mailer, env });
   meRoutes(app, { prisma });
   funnelRoutes(app, { prisma, env });
+  feedbackRoutes(app, { mailer, env });
 
   return app;
 }
