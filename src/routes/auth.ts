@@ -16,12 +16,14 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
   app.post('/auth/magic-link', {
     config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
   }, async (req, reply) => {
-    const { email } = MagicLinkBody.parse(req.body);
+    const { email, locale } = MagicLinkBody.parse(req.body);
     const name = email.split('@')[0];
     const user = await prisma.user.upsert({
       where: { email },
-      update: {},
-      create: { email, name },
+      // Nur updaten, wenn der Client eine Sprache mitsendet (letzte gewinnt) —
+      // locale-lose Logins (alte Clients, Test-Helfer) dürfen den Bestand nicht auf de zurücksetzen.
+      update: locale ? { locale } : {},
+      create: { email, name, locale: locale ?? 'de' },
     });
     const raw = generateToken();
     const code = generateLoginCode(); // Alternative zum Link: Anmelden auf einem anderen Gerät

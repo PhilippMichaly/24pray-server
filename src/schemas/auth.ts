@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-export const MagicLinkBody = z.object({ email: z.string().email() });
+export const MailLocale = z.enum(['de', 'en', 'es', 'he', 'ar']);
+export const MagicLinkBody = z.object({ email: z.string().email(), locale: MailLocale.optional() });
 export const VerifyBody = z.object({ token: z.string().min(10) });
 export const VerifyCodeBody = z.object({
   email: z.string().email(),

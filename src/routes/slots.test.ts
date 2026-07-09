@@ -271,3 +271,27 @@ describe('slots', () => {
 function gslotName(s: { userName: string | null }): string | null {
   return s.userName;
 }
+
+describe('Backlog 1 — Locale-Erfassung bei Buchung', () => {
+  it('Gastbuchung persistiert locale am Slot (default de)', async () => {
+    const owner = await loginAs('un1-slotloc-owner@example.com');
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un1 LocTest', startDate: at(0), endDate: at(6), visibility: 'PUBLIC' },
+    });
+    const id = res.json().id;
+    const b1 = await app.inject({
+      method: 'POST', url: `/projects/${id}/slots`,
+      payload: { startTime: at(1), guestName: 'Gast Es', guestEmail: 'un1-es@example.com', locale: 'es' },
+    });
+    expect(b1.statusCode).toBe(200);
+    const s1 = await db.prisma.prayerSlot.findUniqueOrThrow({ where: { id: b1.json().id } });
+    expect(s1.locale).toBe('es');
+    const b2 = await app.inject({
+      method: 'POST', url: `/projects/${id}/slots`,
+      payload: { startTime: at(2), guestName: 'Gast De' },
+    });
+    const s2 = await db.prisma.prayerSlot.findUniqueOrThrow({ where: { id: b2.json().id } });
+    expect(s2.locale).toBe('de');
+  });
+});

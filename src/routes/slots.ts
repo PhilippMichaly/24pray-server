@@ -100,6 +100,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
           // Gast: Secret fürs spätere Selbst-Storno minten (§6.3). Im Response enthalten.
           guestToken: userId ? null : generateToken(),
           notifyChannel: body.notifyChannel,
+          locale: body.locale,
           locationLat: body.locationLat ?? null,
           locationLon: body.locationLon ?? null,
         },

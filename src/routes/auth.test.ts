@@ -124,3 +124,23 @@ describe('auth flow', () => {
     expect(late.statusCode).toBe(400);
   });
 });
+
+describe('Backlog 1 — Locale-Erfassung beim Login', () => {
+  it('magic-link persistiert locale am User; erneuter Login aktualisiert sie', async () => {
+    await app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: 'un1-locale@example.com', locale: 'he' }, remoteAddress: '10.9.0.1' });
+    let u = await db.prisma.user.findUniqueOrThrow({ where: { email: 'un1-locale@example.com' } });
+    expect(u.locale).toBe('he');
+    await app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: 'un1-locale@example.com', locale: 'en' }, remoteAddress: '10.9.0.2' });
+    u = await db.prisma.user.findUniqueOrThrow({ where: { email: 'un1-locale@example.com' } });
+    expect(u.locale).toBe('en');
+  });
+
+  it('ohne locale bleibt der Default de', async () => {
+    await app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: 'un1-default@example.com' }, remoteAddress: '10.9.0.3' });
+    const u = await db.prisma.user.findUniqueOrThrow({ where: { email: 'un1-default@example.com' } });
+    expect(u.locale).toBe('de');
+  });
+});
