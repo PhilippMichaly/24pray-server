@@ -113,6 +113,10 @@ COOKIE_SECURE=false
 # Gesetzt = echter Versand, Testmodus-Button verschwindet automatisch.
 SMTP_URL=
 SMTP_FROM=24pray <no-reply@24pray.org>
+# Signiert Abmelde-Links der Update-Mails (Backlog 1) — in Prod IMMER setzen (openssl rand -hex 32)
+UNSUBSCRIBE_SECRET=
+# Lese-Token fuer GET /stats/funnel (Backlog 8) — lang+zufaellig; leer = Endpoint aus (404)
+FUNNEL_TOKEN=
 EOF
 chmod 600 /etc/24pray-api.env'
 ```
