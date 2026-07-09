@@ -18,6 +18,8 @@ const EnvSchema = z.object({
   COOKIE_SECURE: boolish.default(false),
   SMTP_URL: z.string().optional().default(''),
   SMTP_FROM: z.string().default('24pray <no-reply@24pray.local>'),
+  // Signiert die Abmelde-Links der Update-Mails (Backlog 1). In Produktion setzen!
+  UNSUBSCRIBE_SECRET: z.string().default('dev-unsubscribe-secret'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
