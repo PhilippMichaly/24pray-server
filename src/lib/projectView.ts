@@ -10,6 +10,7 @@ export interface ProjectWithStats {
   startDate: string;
   endDate: string;
   timezone: string;
+  language: string;
   slotDurationMinutes: number;
   maskNames: boolean;
   notifyOnBooking: boolean;
@@ -74,6 +75,7 @@ export async function toProjectWithStats(
     startDate: project.startDate.toISOString(),
     endDate: project.endDate.toISOString(),
     timezone: project.timezone,
+    language: project.language,
     slotDurationMinutes: project.slotDurationMinutes,
     maskNames: project.maskNames,
     notifyOnBooking: project.notifyOnBooking,

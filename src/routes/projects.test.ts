@@ -483,6 +483,35 @@ describe('fix2-POST /projects/:id/shift — Shift-Kollision zwischen zwei gebuch
   });
 });
 
+describe('Backlog 5 — Wachen-Sprache', () => {
+  it('Create persistiert language und Liste liefert es zurück; Default de', async () => {
+    const owner = await loginAs('un5-lang-owner@example.com');
+    const es = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un5 Vigilia', startDate: future(1), endDate: future(6), visibility: 'PUBLIC', language: 'es' },
+    });
+    expect(es.statusCode).toBe(200);
+    expect(es.json().language).toBe('es');
+    const de = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un5 Wache', startDate: future(1), endDate: future(6), visibility: 'PUBLIC' },
+    });
+    expect(de.json().language).toBe('de');
+    const list = await app.inject({ method: 'GET', url: '/projects', cookies: { session: owner } });
+    const mine = (list.json() as { title: string; language: string }[]).filter((p) => p.title.startsWith('un5 '));
+    expect(new Set(mine.map((p) => p.language))).toEqual(new Set(['es', 'de']));
+  });
+
+  it('ungültige language wird abgelehnt (400)', async () => {
+    const owner = await loginAs('un5-lang-owner2@example.com');
+    const bad = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un5 Bad', startDate: future(1), endDate: future(6), language: 'ru' },
+    });
+    expect(bad.statusCode).toBe(400);
+  });
+});
+
 describe('wk-DELETE /projects/:id — Wache löschen (Ersteller-Lebenszyklus)', () => {
   it('403 für Nicht-Organisator', async () => {
     const orga = await loginAs('wk-del-orga@example.com');

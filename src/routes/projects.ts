@@ -74,6 +74,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
         startDate: new Date(body.startDate),
         endDate: new Date(body.endDate),
         timezone: body.timezone,
+        language: body.language,
         slotDurationMinutes: body.slotDurationMinutes,
         visibility: body.visibility,
         maskNames: body.maskNames,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MailLocale } from './auth.js';
 
 /** Gruppen-Link: nur die echte Dienst-Domain, nur https (Anti-Phishing hinter Marken-Buttons). */
 const GroupLink = (prefix: string, re: RegExp) =>
@@ -13,6 +14,7 @@ export const CreateProjectBody = z.object({
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
   timezone: z.string().min(1).default('Europe/Berlin'),
+  language: MailLocale.default('de'),
   // Wählbare Aufteilung der Wache: Stunden (60) oder ganze Tage (1440) — kein Zwischenwert (24pray Tages-Wachen).
   slotDurationMinutes: z.union([z.literal(60), z.literal(1440)]).default(60),
   visibility: ProjectVisibility.default('PRIVATE'),
