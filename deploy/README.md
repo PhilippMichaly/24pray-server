@@ -339,6 +339,26 @@ Neue Prisma-Migrationen laufen beim API-Neustart automatisch (`ExecStartPre`).
 - **Lokale Entwicklung:** nie `next build` neben laufendem `next dev` (teilen sich `.next/` — der Dev-Server verliert seine Assets, Seite lädt „leer"). Verwaiste Next-Prozesse findet `lsof` teils nicht → `ss -ltnp | grep :3000`.
 - `NEXT_PUBLIC_*`-Variablen werden **zur Build-Zeit** eingebacken — deshalb `/api` relativ halten; absolute URLs erzwingen Rebuilds.
 - SQLite-Pfad: `DATABASE_URL` absolut angeben (`file:/opt/…`), Prisma löst relative Pfade gegen das Schema-Verzeichnis auf.
+- **`server.ts` liest `DATA_DIR`, NICHT `DATABASE_URL`** — die Env-Variable in
+  Schritt 5 wird nur für `prisma migrate`/CLI-Aufrufe gebraucht; die App selbst baut
+  ihre SQLite-URL zur Laufzeit aus `DATA_DIR` (`src/server.ts`). Eigene API-Instanzen
+  (z. B. für Lasttests) mit `DATA_DIR=<dir> PORT=<p> npx tsx src/server.ts` starten,
+  sonst landet man ungewollt auf der falschen DB.
+- **`prisma migrate dev` bei laufender Dev-API** → „database is locked" (SQLite-Writer-
+  Konflikt). Migrationsordner stattdessen manuell anlegen
+  (`prisma/migrations/<timestamp>_<name>/migration.sql`, Timestamp nach dem letzten
+  vorhandenen), SQL direkt gegen die Dev-DB ausführen, dann
+  `DATABASE_URL="file:../data/24pray.db" npx prisma migrate resolve --applied <name>`.
+- **tsx-watch lädt neue Routen manchmal nicht** — nach `prisma generate` hängt der
+  Dev-Prozess gelegentlich am alten Client/alten Routen fest. Abhilfe: `touch
+  src/server.ts` oder den Dev-Prozess killen und `npm run dev` neu starten.
+
+## Off-site-Backup
+
+Die Produktions-DB wird nachts per Pull-Prinzip von **tsrv** (Heim-Nettop) vom VPS
+gezogen, `age`-verschlüsselt und zusätzlich nach OneDrive gesynct — das VPS bekommt
+dabei keine Cloud-Credentials, tsrv zieht aktiv über einen auf `rrsync -ro` beschränkten
+SSH-Key. Canonical-Doku (Architektur, Recipient, Restore): `LGRL/scripts/24pray-backup/README.md`.
 
 ## Secrets-Inventar
 
@@ -364,9 +384,10 @@ Stand 2026-07-08. Zwei Bausteine, beide ohne Dritt-Dienste:
    vor curl. Test: Skriptkopie mit erzwungenem `PROBLEMS`-Eintrag laufen lassen.
 
 2. **Externer Uptime-Check** (Totalausfall-Erkennung): geplant als
-   GitHub-Actions-Cron in diesem Repo (`.github/workflows/uptime.yml`) — pusht
-   erst, wenn der gh-Token den `workflow`-Scope hat
-   (`gh auth refresh -h github.com -s workflow`).
+   GitHub-Actions-Cron in diesem Repo (`.github/workflows/uptime.yml`).
+   **Status (2026-07-09): weiterhin pending workflow-Scope** — pusht erst, wenn der
+   gh-Token den `workflow`-Scope hat (`gh auth refresh -h github.com -s workflow`);
+   unverändert seit Ersteinrichtung, kein Fortschritt in den letzten zwei Feature-Tagen.
 
 Grundsatz: Selbstcheck erkennt alles außer „Server komplett weg"; dafür ist der
 externe Cron zuständig. Kein Prometheus/Grafana auf dem VPS (RAM, Wartungsfläche,
