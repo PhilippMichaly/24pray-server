@@ -24,6 +24,11 @@ const EnvSchema = z.object({
   FUNNEL_TOKEN: z.string().default(''),
   // Empfänger der Nutzer-Feedback-Mails (User-Zusatzpunkt). Leer = /feedback antwortet 404.
   FEEDBACK_TO: z.string().default(''),
+  // Web-Push VAPID (Backlog 7). Alle drei leer = Push-Feature aus (Routen 404, Hooks no-op).
+  // Erzeugen: npx web-push generate-vapid-keys
+  VAPID_PUBLIC_KEY: z.string().default(''),
+  VAPID_PRIVATE_KEY: z.string().default(''),
+  VAPID_SUBJECT: z.string().default(''), // z. B. mailto:no-reply@24pray.org
 });
 
 export type Env = z.infer<typeof EnvSchema>;

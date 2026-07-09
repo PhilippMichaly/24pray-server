@@ -23,6 +23,7 @@ model User {
   recurring      RecurringCommitment[]
   requests       PrayerRequest[]
   reminderPref   ReminderPreference?
+  pushSubs       PushSubscription[]
 }
 
 model PrayerProject {
@@ -141,6 +142,21 @@ model FunnelCount {
   count Int    @default(0)
 
   @@unique([date, step])
+}
+
+// Web-Push (Backlog 7): eine Subscription pro Browser/Gerät, an den eingeloggten User gebunden
+// (Gäste bleiben Mail-only). endpoint ist der eindeutige Browser-Push-Endpoint; 404/410 beim
+// Senden = abgelaufen → Row wird automatisch aufgeräumt (lib/push.ts).
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model ReminderPreference {

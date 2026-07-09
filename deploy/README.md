@@ -119,6 +119,10 @@ UNSUBSCRIBE_SECRET=
 FUNNEL_TOKEN=
 # Empfaenger der Nutzer-Feedback-Mails (Footer-Dialog) — leer = Feature aus (404)
 FEEDBACK_TO=
+# Web-Push VAPID (Backlog 7) — erzeugen mit: npx web-push generate-vapid-keys; leer = Push aus
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:no-reply@24pray.org
 EOF
 chmod 600 /etc/24pray-api.env'
 ```

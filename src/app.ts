@@ -6,6 +6,7 @@ import { ZodError } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import type { Env } from './env.js';
 import { createMailer, type Mailer } from './lib/mailer.js';
+import { createPushSender, type PushSender } from './lib/push.js';
 import { registerAuth } from './plugins/auth.js';
 import { authRoutes } from './routes/auth.js';
 import { projectRoutes } from './routes/projects.js';
@@ -14,16 +15,20 @@ import { communityRoutes } from './routes/community.js';
 import { meRoutes } from './routes/me.js';
 import { funnelRoutes } from './routes/funnel.js';
 import { feedbackRoutes } from './routes/feedback.js';
+import { pushRoutes } from './routes/push.js';
 
 export interface BuildAppDeps {
   prisma: PrismaClient;
   env: Env;
   mailer?: Mailer;
+  // Backlog 7: injizierbar für Tests (Fakes) / explizit null zum Ausschalten trotz VAPID-Env.
+  pushSender?: PushSender | null;
 }
 
 export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   const { prisma, env } = deps;
   const mailer = deps.mailer ?? createMailer({ smtpUrl: env.SMTP_URL, from: env.SMTP_FROM });
+  const pushSender = deps.pushSender !== undefined ? deps.pushSender : createPushSender(env);
 
   // Lasttest-Fix: WAL entkoppelt Reader von Writern (persistiert in der DB-Datei).
   try {
@@ -66,6 +71,7 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   meRoutes(app, { prisma });
   funnelRoutes(app, { prisma, env });
   feedbackRoutes(app, { mailer, env });
+  pushRoutes(app, { prisma, env });
 
   return app;
 }
