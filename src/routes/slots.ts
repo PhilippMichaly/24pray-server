@@ -9,6 +9,7 @@ import { requireUser } from '../plugins/auth.js';
 import { BookSlotBody } from '../schemas/slots.js';
 import { buildSlotGrid, slotLengthMs, type BookedSlotInput } from '../lib/slotGrid.js';
 import { canReadProject, ensureMembership } from '../lib/access.js';
+import { bumpFunnel } from './funnel.js';
 
 function httpError(status: number, message: string) {
   const e = new Error(message) as Error & { statusCode?: number };
@@ -113,6 +114,9 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     }
     // Buchung macht eingeloggte User zu Mitgliedern (W3.2 Membership).
     if (userId) await ensureMembership(prisma, userId, id);
+
+    // Funnel-Conversion (Backlog 8): serverseitig, aggregiert, ohne Personenbezug.
+    bumpFunnel(prisma, 'booking').catch((err) => console.error('[funnel] booking bump failed:', err));
 
     // Gast mit E-Mail: Bestätigung mit Kalender-Links (Fehler dürfen die Buchung nie kippen).
     if (!userId && slot.guestEmail && mailer?.sendBookingConfirmation && env) {

@@ -20,6 +20,8 @@ const EnvSchema = z.object({
   SMTP_FROM: z.string().default('24pray <no-reply@24pray.local>'),
   // Signiert die Abmelde-Links der Update-Mails (Backlog 1). In Produktion setzen!
   UNSUBSCRIBE_SECRET: z.string().default('dev-unsubscribe-secret'),
+  // Lese-Token für GET /stats/funnel (Backlog 8). Leer = Lese-Endpoint antwortet 404.
+  FUNNEL_TOKEN: z.string().default(''),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

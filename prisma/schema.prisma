@@ -132,6 +132,17 @@ model UpdateOptOut {
   @@unique([projectId, email])
 }
 
+// Cookiefreies Funnel-Zählen (Backlog 8): AUSSCHLIESSLICH aggregierte Tageszähler —
+// keine IP, kein UA, keine IDs. date = YYYY-MM-DD (UTC), step = landing|list|watch|booking.
+model FunnelCount {
+  id    String @id @default(cuid())
+  date  String
+  step  String
+  count Int    @default(0)
+
+  @@unique([date, step])
+}
+
 model ReminderPreference {
   id            String @id @default(cuid())
   userId        String @unique
