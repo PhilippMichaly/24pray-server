@@ -55,6 +55,38 @@ export interface ProjectFarewellMail {
   slots: string[]; // ISO-Starts der betroffenen (nicht mehr stattfindenden) Stunden
 }
 
+/** Owner-Update im „Neues"-Tab → Mail an alle Teilnehmer (Backlog 1). */
+export interface UpdateNoticeMail {
+  projectTitle: string;
+  authorName: string;
+  text: string; // Update-Text (User-Content — im HTML escapen!)
+  projectUrl: string;
+  unsubscribeUrl: string;
+  locale: string; // de|en|es|he|ar; Unbekanntes → de
+}
+
+// Einzige lokalisierte Mail (Entscheidung 2026-07-09): Empfänger-Locale wird seit Backlog 1
+// erfasst; die Alt-Mails bleiben vorerst deutsch (separater Backlog-Punkt).
+// he/ar: Muttersprachler-Review steht noch aus (Backlog-Merkposten).
+const UPDATE_NOTICE_TEXTS: Record<string, {
+  subject: (title: string) => string;
+  posted: (author: string) => string;
+  toWatch: string;
+  unsubscribe: string;
+  dir: 'ltr' | 'rtl';
+}> = {
+  de: { subject: (t) => `24pray — Neues aus der Gebetswache (${t})`, posted: (a) => `${a} hat ein Update zum Anliegen gepostet:`, toWatch: 'Zur Gebetswache', unsubscribe: 'Keine Update-Mails mehr für diese Wache', dir: 'ltr' },
+  en: { subject: (t) => `24pray — news from the prayer watch (${t})`, posted: (a) => `${a} posted an update on the concern:`, toWatch: 'Open the prayer watch', unsubscribe: 'Stop update emails for this watch', dir: 'ltr' },
+  es: { subject: (t) => `24pray — novedades de la vigilia de oración (${t})`, posted: (a) => `${a} publicó una novedad sobre la intención:`, toWatch: 'Ir a la vigilia de oración', unsubscribe: 'No recibir más correos de novedades de esta vigilia', dir: 'ltr' },
+  he: { subject: (t) => `24pray — חדש ממשמרת התפילה (${t})`, posted: (a) => `${a} פרסם/ה עדכון על הבקשה:`, toWatch: 'למשמרת התפילה', unsubscribe: 'להפסקת מיילי עדכונים עבור משמרת זו', dir: 'rtl' },
+  ar: { subject: (t) => `24pray — جديد من سهرة الصلاة (${t})`, posted: (a) => `نشر ${a} تحديثًا حول الطلب:`, toWatch: 'إلى سهرة الصلاة', unsubscribe: 'إيقاف رسائل التحديثات لهذه السهرة', dir: 'rtl' },
+};
+
+/** Minimal-Escaping für User-Content in Mail-HTML (Update-Text, Autor-Name). */
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 export interface Mailer {
   sendMagicLink(email: string, url: string, code?: string): Promise<void>;
   sendReminder?(email: string, reminder: ReminderMail): Promise<void>;
@@ -62,6 +94,7 @@ export interface Mailer {
   sendBookingNotice?(email: string, notice: BookingNoticeMail): Promise<void>;
   sendScheduleChange?(email: string, change: ScheduleChangeMail): Promise<void>;
   sendProjectFarewell?(email: string, farewell: ProjectFarewellMail): Promise<void>;
+  sendUpdateNotice?(email: string, notice: UpdateNoticeMail): Promise<void>;
 }
 
 function formatReminderTime(r: { startTime: string; timezone: string; isAllDay?: boolean }): string {
@@ -115,6 +148,9 @@ export function createMailer(config: MailerConfig): Mailer {
       },
       async sendProjectFarewell(email, f) {
         console.log(`[mailer:dev] project farewell for ${email}: ${f.projectTitle} (${f.slots.length} slot(s))`);
+      },
+      async sendUpdateNotice(email, n) {
+        console.log(`[mailer:dev] update notice for ${email}: ${n.projectTitle} (${n.locale})`);
       },
     };
   }
@@ -193,6 +229,19 @@ export function createMailer(config: MailerConfig): Mailer {
         subject: `24pray — Gebetswache beendet (${f.projectTitle})`,
         text: `Die Gebetswache „${f.projectTitle}" wurde beendet. Deine Stunde${plural ? `n am ${list} finden` : ` am ${list} findet`} nicht mehr statt. Danke fürs Mitwachen.`,
         html: `<p>Die Gebetswache „<strong>${f.projectTitle}</strong>" wurde beendet. Deine Stunde${plural ? `n am <strong>${list}</strong> finden` : ` am <strong>${list}</strong> findet`} nicht mehr statt. Danke fürs Mitwachen.</p>`,
+      });
+    },
+    async sendUpdateNotice(email, n) {
+      const tr = UPDATE_NOTICE_TEXTS[n.locale] ?? UPDATE_NOTICE_TEXTS.de;
+      await transport.sendMail({
+        from: config.from,
+        to: email,
+        subject: tr.subject(n.projectTitle),
+        text: `${tr.posted(n.authorName)}\n\n${n.text}\n\n${tr.toWatch}: ${n.projectUrl}\n\n${tr.unsubscribe}: ${n.unsubscribeUrl}`,
+        html: `<div dir="${tr.dir}"><p>${tr.posted(escapeHtml(n.authorName))}</p>` +
+          `<blockquote style="margin:0;padding-inline-start:12px;border-inline-start:3px solid #ccc;white-space:pre-wrap">${escapeHtml(n.text)}</blockquote>` +
+          `<p><a href="${n.projectUrl}">${tr.toWatch}</a></p>` +
+          `<p style="font-size:12px;color:#888"><a href="${n.unsubscribeUrl}">${tr.unsubscribe}</a></p></div>`,
       });
     },
   };

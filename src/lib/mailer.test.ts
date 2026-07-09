@@ -95,3 +95,19 @@ describe('mailer', () => {
     spy.mockRestore();
   });
 });
+
+describe('sendUpdateNotice (Backlog 1)', () => {
+  it('Dev-Mailer loggt Empfänger, Titel und Locale', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const mailer = createMailer({ smtpUrl: '', from: 'a@b' });
+    await mailer.sendUpdateNotice!('un1-x@y.z', {
+      projectTitle: 'Wache Lena', authorName: 'Ruth', text: 'Es geht ihr besser!',
+      projectUrl: 'http://app/projects/p1', unsubscribeUrl: 'http://app/api/unsub', locale: 'en',
+    });
+    const logged = spy.mock.calls.flat().join(' ');
+    expect(logged).toContain('un1-x@y.z');
+    expect(logged).toContain('Wache Lena');
+    expect(logged).toContain('en');
+    spy.mockRestore();
+  });
+});
