@@ -314,4 +314,23 @@ describe('Backlog 4 — Bestätigungsmail trägt projectUrl', () => {
       expect(hit!.m.projectUrl).toContain(`/projects/${id}`);
     });
   });
+
+  it('eingeloggter Bucher bekommt Bestätigungs-Mail an die Konto-Adresse (Live-Befund 2026-07-09)', async () => {
+    const owner = await loginAs('un10-owner@example.com');
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un10 MailTest', startDate: at(0), endDate: at(6), visibility: 'PUBLIC' },
+    });
+    const id = res.json().id;
+    const booker = await loginAs('un10-booker@example.com');
+    await app.inject({
+      method: 'POST', url: `/projects/${id}/slots`, cookies: { session: booker },
+      payload: { startTime: at(2) },
+    });
+    await vi.waitFor(() => {
+      const hit = bookingMails.find((b) => b.email === 'un10-booker@example.com');
+      expect(hit).toBeTruthy();
+      expect(hit!.m.projectUrl).toContain(`/projects/${id}`);
+    });
+  });
 });

@@ -118,11 +118,15 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     // Funnel-Conversion (Backlog 8): serverseitig, aggregiert, ohne Personenbezug.
     bumpFunnel(prisma, 'booking').catch((err) => console.error('[funnel] booking bump failed:', err));
 
-    // Gast mit E-Mail: Bestätigung mit Kalender-Links (Fehler dürfen die Buchung nie kippen).
-    if (!userId && slot.guestEmail && mailer?.sendBookingConfirmation && env) {
+    // Bestätigung mit Kalender-Links an Gast (guestEmail) ODER eingeloggten Bucher (Konto-Adresse).
+    // Live-Befund 2026-07-09: eingeloggte Bucher bekamen nie eine Mail — nur Gäste. Fehler
+    // dürfen die Buchung nie kippen (fire-and-forget).
+    const confirmTo = userId ? req.user?.email : slot.guestEmail;
+    const confirmName = userId ? (req.user?.name ?? '') : (slot.guestName ?? '');
+    if (confirmTo && mailer?.sendBookingConfirmation && env) {
       const ev = slotEvent(slot, project.title, project);
-      mailer.sendBookingConfirmation(slot.guestEmail, {
-        name: slot.guestName ?? '',
+      mailer.sendBookingConfirmation(confirmTo, {
+        name: confirmName,
         projectTitle: project.title,
         startTime: slot.startTime.toISOString(),
         timezone: project.timezone,
