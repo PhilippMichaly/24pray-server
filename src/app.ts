@@ -38,11 +38,20 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
 
-  app.setErrorHandler((err, _req, reply) => {
+  app.setErrorHandler((err, req, reply) => {
     if (err instanceof ZodError) {
       return reply.code(400).send({ message: err.errors[0]?.message ?? 'Ungültige Eingabe' });
     }
     const status = (err as { statusCode?: number }).statusCode ?? 500;
+    // fix2 (HOCH, End-User-Test v2 Befund 2): 4xx (Zod + httpError-Messages aus den Routen)
+    // bleiben unverändert — die sind bewusste, harmlose Nutzer-Meldungen. Ab 500 aufwärts ist
+    // err.message ein interner Detail (SQL/Constraint/Stacktrace-Fragmente) und darf NICHT an
+    // den Client gehen; stattdessen serverseitig loggen (logger:false loggt sonst gar nichts —
+    // ein 500er würde sonst spurlos verschwinden) und einen neutralen Text zurückgeben.
+    if (status >= 500) {
+      console.error('[api]', req.method, req.url, err);
+      return reply.code(status).send({ message: 'Serverfehler' });
+    }
     return reply.code(status).send({ message: err.message ?? 'Serverfehler' });
   });
 

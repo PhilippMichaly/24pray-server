@@ -170,9 +170,24 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
       // wäre "künftig" relativ zu now nicht mehr von "alter Zeitpunkt" zu unterscheiden.
       const recipients = await collectFutureBookedRecipients(prisma, id, now);
 
+      // fix2 (KRITISCH, End-User-Test v2 Befund 1): Eine einzelne
+      // `startTime = startTime + delta`-Zeile verletzt den partiellen Unique-Index
+      // PrayerSlot_active_slot_unique (projectId, startTime WHERE status IN (BOOKED,
+      // COMPLETED)), sobald ein Slot beim Verschieben auf die noch-unverschobene Zeit
+      // eines anderen Slots im selben UPDATE-Statement rutscht — SQLite prüft die
+      // Unique-Constraint pro Zeile während des Multi-Row-UPDATE, nicht erst am Ende.
+      // Fix: Zwei-Phasen-Update in derselben Transaktion. Phase 1 verschiebt alle Zeiten
+      // um deltaMs + OFFSET — OFFSET (~126900 Jahre in ms) liegt weit außerhalb jedes
+      // realen Epoch-Werts (JS/SQLite-Grenze ±8.64e15), sodass keine Phase-1-Zeile mit
+      // einer noch-unverschobenen Zeile kollidieren kann. Phase 2 zieht OFFSET wieder ab
+      // und landet exakt bei startTime+deltaMs — dort können jetzt keine Kollisionen mehr
+      // auftreten, weil zu diesem Zeitpunkt ALLE Zeilen bereits um denselben Betrag verschoben
+      // sind (eine uniforme Verschiebung erhält die relative Ordnung/Abstände 1:1).
+      const OFFSET = 4_000_000_000_000_000; // 64-bit-sicher, weit außerhalb realer Epochenwerte
       await prisma.$transaction(async (tx) => {
         await tx.$executeRaw`UPDATE PrayerProject SET startDate = startDate + ${deltaMs}, endDate = endDate + ${deltaMs} WHERE id = ${id}`;
-        await tx.$executeRaw`UPDATE PrayerSlot SET startTime = startTime + ${deltaMs}, endTime = endTime + ${deltaMs} WHERE projectId = ${id}`;
+        await tx.$executeRaw`UPDATE PrayerSlot SET startTime = startTime + ${deltaMs} + ${OFFSET}, endTime = endTime + ${deltaMs} + ${OFFSET} WHERE projectId = ${id}`;
+        await tx.$executeRaw`UPDATE PrayerSlot SET startTime = startTime - ${OFFSET}, endTime = endTime - ${OFFSET} WHERE projectId = ${id}`;
         // Reminder sollen für alle (nach dem Shift) künftigen Slots neu feuern.
         await tx.$executeRaw`UPDATE PrayerSlot SET remindedAt = NULL WHERE projectId = ${id} AND startTime > ${now.getTime()}`;
       });

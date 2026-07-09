@@ -394,6 +394,95 @@ describe('wk-POST /projects/:id/shift — Wache verschieben (Ersteller-Lebenszyk
   });
 });
 
+// fix2 (KRITISCH, End-User-Test v2 Befund 1): Shift-Kollision -> 500.
+// `UPDATE PrayerSlot SET startTime = startTime + delta` verletzt den partiellen Unique-Index
+// PrayerSlot_active_slot_unique (projectId, startTime) WHERE status IN (BOOKED, COMPLETED),
+// sobald ein Slot beim Verschieben auf die (noch unverschobene) Zeit eines anderen Slots
+// rutscht — SQLite prüft die Unique-Constraint pro Zeile während des Updates.
+describe('fix2-POST /projects/:id/shift — Shift-Kollision zwischen zwei gebuchten Slots', () => {
+  // `bookOrder` steuert, welcher der beiden Slots ZUERST gebucht wird (= niedrigere rowid
+  // = wird von SQLite beim Multi-Row-UPDATE zuerst verarbeitet). Ein Vorwärts-Shift kollidiert
+  // nur, wenn die zeitlich FRÜHERE Reihe zuerst verarbeitet wird und in die (noch unverschobene)
+  // Position der später verarbeiteten, zeitlich SPÄTEREN Reihe rutscht — und umgekehrt für
+  // rückwärts. Deshalb: 'earlier-first' für den Vorwärts-, 'later-first' für den Rückwärts-Test.
+  async function setupTwoBookedSlotsXApart(
+    prefix: string,
+    deltaHours: number,
+    bookOrder: 'earlier-first' | 'later-first',
+  ) {
+    const orga = await loginAs(`${prefix}-orga@example.com`);
+    // Ein einziger Referenz-Zeitpunkt für Projekt + beide Slots: `future(h)` ruft
+    // Date.now() bei jedem Aufruf neu auf, was bei einem exakten Vergleich (== statt
+    // ~=) durch Millisekunden-Jitter zwischen den Calls fälschlich KEINE Kollision
+    // erzeugen könnte. Hier wird alles deterministisch aus derselben `base` abgeleitet,
+    // damit die verschobene Zeit bit-exakt die alte Zeit der anderen Reihe trifft.
+    const base = Date.now() + 24 * 3600_000; // +1 Tag Puffer, damit alles in der Zukunft liegt
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: `${prefix}-Projekt`, startDate: iso(base), endDate: iso(base + 480 * 3600_000), visibility: 'PUBLIC' },
+    });
+    const pid = create.json().id;
+    const earlierMs = base + 10 * 3600_000;
+    const laterMs = base + (10 + deltaHours) * 3600_000;
+    const [firstMs, secondMs] = bookOrder === 'earlier-first' ? [earlierMs, laterMs] : [laterMs, earlierMs];
+    const first = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: orga },
+      payload: { startTime: iso(firstMs) },
+    });
+    const second = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: orga },
+      payload: { startTime: iso(secondMs) },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    const slotA = bookOrder === 'earlier-first' ? first.json() : second.json(); // stets die zeitlich frühere
+    const slotB = bookOrder === 'earlier-first' ? second.json() : first.json(); // stets die zeitlich spätere
+    return { orga, pid, slotA, slotB, project: create.json() };
+  }
+
+  it('Vorwärts-Shift um genau den Abstand X zweier gebuchter Slots -> 200, beide Slots exakt verschoben', async () => {
+    const deltaHours = 24;
+    const { orga, pid, slotA, slotB, project } = await setupTwoBookedSlotsXApart('fix2-fwd', deltaHours, 'earlier-first');
+    const deltaMs = deltaHours * 3600_000;
+    const newStart = new Date(new Date(project.startDate).getTime() + deltaMs).toISOString();
+
+    const shift = await app.inject({
+      method: 'POST', url: `/projects/${pid}/shift`, cookies: { session: orga },
+      payload: { newStartDate: newStart },
+    });
+
+    expect(shift.statusCode).toBe(200);
+    const rowA = await db.prisma.prayerSlot.findUnique({ where: { id: slotA.id } });
+    const rowB = await db.prisma.prayerSlot.findUnique({ where: { id: slotB.id } });
+    expect(rowA!.startTime.getTime()).toBe(new Date(slotA.startTime).getTime() + deltaMs);
+    expect(rowA!.endTime.getTime()).toBe(new Date(slotA.endTime).getTime() + deltaMs);
+    expect(rowB!.startTime.getTime()).toBe(new Date(slotB.startTime).getTime() + deltaMs);
+    expect(rowB!.endTime.getTime()).toBe(new Date(slotB.endTime).getTime() + deltaMs);
+    expect(rowA!.status).toBe('BOOKED');
+    expect(rowB!.status).toBe('BOOKED');
+  });
+
+  it('Rückwärts-Shift um genau -X -> 200, beide Slots exakt verschoben (kein Datenverlust)', async () => {
+    const deltaHours = 24;
+    const { orga, pid, slotA, slotB, project } = await setupTwoBookedSlotsXApart('fix2-bwd', deltaHours, 'later-first');
+    const deltaMs = -deltaHours * 3600_000;
+    const newStart = new Date(new Date(project.startDate).getTime() + deltaMs).toISOString();
+
+    const shift = await app.inject({
+      method: 'POST', url: `/projects/${pid}/shift`, cookies: { session: orga },
+      payload: { newStartDate: newStart },
+    });
+
+    expect(shift.statusCode).toBe(200);
+    const rowA = await db.prisma.prayerSlot.findUnique({ where: { id: slotA.id } });
+    const rowB = await db.prisma.prayerSlot.findUnique({ where: { id: slotB.id } });
+    expect(rowA!.startTime.getTime()).toBe(new Date(slotA.startTime).getTime() + deltaMs);
+    expect(rowB!.startTime.getTime()).toBe(new Date(slotB.startTime).getTime() + deltaMs);
+    expect(await db.prisma.prayerSlot.count({ where: { projectId: pid } })).toBe(2); // kein Datenverlust
+  });
+});
+
 describe('wk-DELETE /projects/:id — Wache löschen (Ersteller-Lebenszyklus)', () => {
   it('403 für Nicht-Organisator', async () => {
     const orga = await loginAs('wk-del-orga@example.com');
