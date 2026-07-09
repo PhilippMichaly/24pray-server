@@ -7,6 +7,7 @@ import { maskName } from '../lib/slotGrid.js';
 import type { Env } from '../env.js';
 import type { Mailer, UpdateNoticeMail } from '../lib/mailer.js';
 import { unsubscribeUrl, verifyUnsubscribeSig } from '../lib/unsubscribe.js';
+import { MailLocale } from '../schemas/auth.js';
 
 function httpError(status: number, message: string) {
   const e = new Error(message) as Error & { statusCode?: number };
@@ -24,7 +25,7 @@ const ReminderBody = z.object({ minutesBefore: z.number().int().min(5).max(24 * 
 /** Alle Update-Empfänger einer Wache: jede Person, die je eine Stunde gehalten oder gebucht hat
  *  (BOOKED + COMPLETED — wer mitgebetet hat, will vom Ausgang hören), dedupliziert pro E-Mail,
  *  ohne Opt-outs und ohne den Owner selbst. Locale: User-Präferenz, für Gäste die Buchungs-Sprache. */
-interface UpdateRecipient { email: string; name: string; locale: string }
+interface UpdateRecipient { email: string; locale: string }
 
 async function collectUpdateRecipients(
   prisma: PrismaClient,
@@ -47,7 +48,7 @@ async function collectUpdateRecipients(
     if (!email) continue; // Gast ohne E-Mail: kein Kanal
     const key = email.toLowerCase();
     if (suppressed.has(key) || byEmail.has(key)) continue;
-    byEmail.set(key, { email, name: s.user?.name ?? s.guestName ?? '', locale: s.user?.locale ?? s.locale });
+    byEmail.set(key, { email, locale: s.user?.locale ?? s.locale });
   }
   return [...byEmail.values()];
 }
@@ -55,7 +56,7 @@ async function collectUpdateRecipients(
 const UnsubscribeQuery = z.object({
   email: z.string().email(),
   sig: z.string().min(1),
-  locale: z.string().optional(),
+  locale: MailLocale.optional(),
 });
 
 // Bestätigungsseite in der Sprache der Mail, aus der geklickt wurde.

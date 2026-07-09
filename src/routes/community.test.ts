@@ -497,4 +497,13 @@ describe('Backlog 1 — Update-Benachrichtigung', () => {
     await vi.waitFor(() => expect(updates.length).toBe(1));
     expect(updates[0].email).toBe('un1-up-member@example.com');
   });
+
+  it('Unsubscribe mit locale=__proto__ (Prototype-Pollution-Probe) wird von zod abgelehnt (400)', async () => {
+    const { id } = await setupProjectWithParticipants();
+    const { unsubscribeSig } = await import('../lib/unsubscribe.js');
+    const sig = unsubscribeSig('dev-unsubscribe-secret', id, 'un1-up-guest@example.com');
+    const res = await app.inject({ method: 'GET',
+      url: `/projects/${id}/updates/unsubscribe?email=${encodeURIComponent('un1-up-guest@example.com')}&sig=${sig}&locale=__proto__` });
+    expect(res.statusCode).toBe(400);
+  });
 });
