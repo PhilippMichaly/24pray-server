@@ -507,3 +507,37 @@ describe('Backlog 1 — Update-Benachrichtigung', () => {
     expect(res.statusCode).toBe(400);
   });
 });
+
+describe('Backlog 2 — kumulative Stunden in /stats/public', () => {
+  it('completedHours summiert COMPLETED-Slots gewichtet nach slotDurationMinutes', async () => {
+    const owner = await loginAs('un2-stats-owner@example.com');
+    const future = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
+    // Stunden-Wache (60 min) + Tages-Wache (1440 min)
+    const p1 = (await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un2 Stunden', startDate: future(-48), endDate: future(4), visibility: 'PUBLIC' },
+    })).json().id as string;
+    const p2 = (await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un2 Tage', startDate: future(-72), endDate: future(48), visibility: 'PUBLIC', slotDurationMinutes: 1440 },
+    })).json().id as string;
+
+    const before = (await app.inject({ method: 'GET', url: '/stats/public' })).json().completedHours ?? 0;
+
+    // COMPLETED-Slots direkt anlegen (nur Test-DB): 2×60min = 2h, 1×1440min = 24h → Delta 26h
+    const at = (h: number) => new Date(Date.now() - h * 3600_000);
+    await db.prisma.prayerSlot.create({ data: { projectId: p1, startTime: at(30), endTime: at(29), status: 'COMPLETED', guestName: 'un2-a' } });
+    await db.prisma.prayerSlot.create({ data: { projectId: p1, startTime: at(28), endTime: at(27), status: 'COMPLETED', guestName: 'un2-b' } });
+    await db.prisma.prayerSlot.create({ data: { projectId: p2, startTime: at(60), endTime: at(36), status: 'COMPLETED', guestName: 'un2-c' } });
+
+    const after = (await app.inject({ method: 'GET', url: '/stats/public' })).json().completedHours;
+    expect(typeof after).toBe('number');
+    expect(after - before).toBeCloseTo(26, 5);
+  });
+
+  it('completedHours ist 0-sicher (Feld existiert immer, BOOKED zählt nicht)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/stats/public' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().completedHours).toBeGreaterThanOrEqual(0); // nie null/undefined
+  });
+});

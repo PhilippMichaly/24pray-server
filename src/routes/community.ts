@@ -197,9 +197,16 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
     if (ttl > 0 && statsCache && Date.now() - statsCache.ts < ttl) return statsCache.data;
     const now = new Date();
     const activeWhere = { status: 'ACTIVE', startDate: { lte: now }, endDate: { gte: now } };
-    const [activeChains, heldSlots, located] = await Promise.all([
+    const [activeChains, heldSlots, completedRows, located] = await Promise.all([
       prisma.prayerProject.count({ where: activeWhere }),
       prisma.prayerSlot.count({ where: { status: { in: ['BOOKED', 'COMPLETED'] } } }),
+      // Kumulative Gebets-Stunden (Backlog 2): COMPLETED-Slots gewichtet nach Projekt-Slot-Dauer
+      // (60 vs. 1440 min) — ein Join-Aggregat statt N+1, läuft im TTL-Cache mit.
+      prisma.$queryRaw<{ hours: number | null }[]>`
+        SELECT SUM(p."slotDurationMinutes") / 60.0 AS hours
+        FROM "PrayerSlot" s JOIN "PrayerProject" p ON p."id" = s."projectId"
+        WHERE s."status" = 'COMPLETED'
+      `,
       // Nerven-Netz (W3.5): aktive Ketten mit Standort + verortete Beter-Slots.
       // NUR Koordinaten — nie Namen/Titel; auch PRIVATE-Ketten bleiben anonym.
       prisma.prayerProject.findMany({
@@ -231,9 +238,11 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
         take: 60,
       }),
     ]);
+    const completedHours = Math.round(Number(completedRows[0]?.hours ?? 0) * 100) / 100;
     const data = {
       activeChains,
       heldSlots,
+      completedHours,
       points: located.map((p) => ({
         lat: p.locationLat,
         lon: p.locationLon,
