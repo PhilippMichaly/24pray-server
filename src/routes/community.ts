@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { requireUser } from '../plugins/auth.js';
 import { canReadProject } from '../lib/access.js';
 import { maskName } from '../lib/slotGrid.js';
+import type { Env } from '../env.js';
+import type { Mailer, UpdateNoticeMail } from '../lib/mailer.js';
+import { unsubscribeUrl, verifyUnsubscribeSig } from '../lib/unsubscribe.js';
 
 function httpError(status: number, message: string) {
   const e = new Error(message) as Error & { statusCode?: number };
@@ -18,8 +21,54 @@ const CreateRequestBody = z.object({
 });
 const ReminderBody = z.object({ minutesBefore: z.number().int().min(5).max(24 * 60) });
 
-export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; env?: { STATS_CACHE_TTL_MS: number } }) {
-  const { prisma, env } = deps;
+/** Alle Update-Empfänger einer Wache: jede Person, die je eine Stunde gehalten oder gebucht hat
+ *  (BOOKED + COMPLETED — wer mitgebetet hat, will vom Ausgang hören), dedupliziert pro E-Mail,
+ *  ohne Opt-outs und ohne den Owner selbst. Locale: User-Präferenz, für Gäste die Buchungs-Sprache. */
+interface UpdateRecipient { email: string; name: string; locale: string }
+
+async function collectUpdateRecipients(
+  prisma: PrismaClient,
+  projectId: string,
+  excludeEmail: string | null,
+): Promise<UpdateRecipient[]> {
+  const [slots, optOuts] = await Promise.all([
+    prisma.prayerSlot.findMany({
+      where: { projectId, status: { in: ['BOOKED', 'COMPLETED'] } },
+      include: { user: true },
+      orderBy: { startTime: 'asc' },
+    }),
+    prisma.updateOptOut.findMany({ where: { projectId } }),
+  ]);
+  const suppressed = new Set(optOuts.map((o) => o.email.toLowerCase()));
+  if (excludeEmail) suppressed.add(excludeEmail.toLowerCase());
+  const byEmail = new Map<string, UpdateRecipient>();
+  for (const s of slots) {
+    const email = s.user?.email ?? s.guestEmail;
+    if (!email) continue; // Gast ohne E-Mail: kein Kanal
+    const key = email.toLowerCase();
+    if (suppressed.has(key) || byEmail.has(key)) continue;
+    byEmail.set(key, { email, name: s.user?.name ?? s.guestName ?? '', locale: s.user?.locale ?? s.locale });
+  }
+  return [...byEmail.values()];
+}
+
+const UnsubscribeQuery = z.object({
+  email: z.string().email(),
+  sig: z.string().min(1),
+  locale: z.string().optional(),
+});
+
+// Bestätigungsseite in der Sprache der Mail, aus der geklickt wurde.
+const UNSUB_CONFIRM: Record<string, { lang: string; dir: string; title: string; body: string }> = {
+  de: { lang: 'de', dir: 'ltr', title: 'Abgemeldet', body: 'Du bekommst keine Update-Mails mehr zu dieser Gebetswache.' },
+  en: { lang: 'en', dir: 'ltr', title: 'Unsubscribed', body: 'You will no longer receive update emails for this prayer watch.' },
+  es: { lang: 'es', dir: 'ltr', title: 'Baja confirmada', body: 'Ya no recibirás correos de novedades de esta vigilia de oración.' },
+  he: { lang: 'he', dir: 'rtl', title: 'הוסרת מהרשימה', body: 'לא תקבל/י עוד מיילים עם עדכונים עבור משמרת תפילה זו.' },
+  ar: { lang: 'ar', dir: 'rtl', title: 'تم إلغاء الاشتراك', body: 'لن تصلك بعد الآن رسائل التحديثات لسهرة الصلاة هذه.' },
+};
+
+export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env }) {
+  const { prisma, mailer, env } = deps;
   // Lasttest-Fix: Landing-Poll (60s pro offenem Tab) darf nicht mit der Nutzerzahl skalieren.
   let statsCache: { data: unknown; ts: number } | null = null;
 
@@ -65,7 +114,52 @@ export function communityRoutes(app: FastifyInstance, deps: { prisma: PrismaClie
     const created = await prisma.prayerRequest.create({
       data: { projectId: project.id, authorId: user.id, authorName, text: body.text },
     });
+    // Fan-out (Backlog 1): fire-and-forget — die Antwort auf den Post wartet nie auf SMTP.
+    if (mailer?.sendUpdateNotice && env) {
+      const mail = mailer.sendUpdateNotice.bind(mailer);
+      void (async () => {
+        const organizer = await prisma.user.findUniqueOrThrow({
+          where: { id: project.organizerId }, select: { email: true },
+        });
+        const recipients = await collectUpdateRecipients(prisma, project.id, organizer.email);
+        const invite = project.visibility === 'PRIVATE' ? `?invite=${project.inviteToken}` : '';
+        const projectUrl = `${env.APP_URL}/projects/${project.id}${invite}`;
+        for (const r of recipients) {
+          const notice: UpdateNoticeMail = {
+            projectTitle: project.title,
+            authorName,
+            text: body.text,
+            projectUrl,
+            unsubscribeUrl: unsubscribeUrl(env.APP_URL, env.UNSUBSCRIBE_SECRET, project.id, r.email, r.locale),
+            locale: r.locale,
+          };
+          await mail(r.email, notice).catch((err) => console.error(`[mail] update notice failed for ${r.email}:`, err));
+        }
+      })().catch((err) => console.error('[mail] update fan-out failed:', err));
+    }
     return { id: created.id, authorName, text: created.text, createdAt: created.createdAt.toISOString() };
+  });
+
+  // Abmelde-Link aus der Update-Mail (Backlog 1): login-frei, HMAC-signiert, idempotent.
+  app.get('/projects/:id/updates/unsubscribe', {
+    config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+  }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { email, sig, locale } = UnsubscribeQuery.parse(req.query);
+    if (!env) throw httpError(500, 'Serverfehler');
+    const project = await prisma.prayerProject.findUnique({ where: { id } });
+    if (!project) throw httpError(404, 'Projekt nicht gefunden');
+    if (!verifyUnsubscribeSig(env.UNSUBSCRIBE_SECRET, id, email, sig)) {
+      throw httpError(403, 'Ungültiger Abmeldelink');
+    }
+    await prisma.updateOptOut.upsert({
+      where: { projectId_email: { projectId: id, email: email.toLowerCase() } },
+      update: {},
+      create: { projectId: id, email: email.toLowerCase() },
+    });
+    const c = UNSUB_CONFIRM[locale ?? ''] ?? UNSUB_CONFIRM.de;
+    reply.type('text/html; charset=utf-8');
+    return `<!doctype html><html lang="${c.lang}" dir="${c.dir}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${c.title} — 24pray</title></head><body style="font-family:system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;text-align:center"><h1 style="font-size:1.3rem">${c.title}</h1><p>${c.body}</p></body></html>`;
   });
 
   // ── Statistik (W3.2, aus COMPLETED-Slots) ───────────────

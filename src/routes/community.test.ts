@@ -1,15 +1,16 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../app.js';
 import { parseEnv } from '../env.js';
 import { makeTestDb, type TestDb } from '../test/helpers.js';
 import { completeElapsedSlots, sendDueReminders } from '../lib/jobs.js';
-import type { ReminderMail } from '../lib/mailer.js';
+import type { ReminderMail, UpdateNoticeMail } from '../lib/mailer.js';
 
 let db: TestDb;
 let app: FastifyInstance;
 const captured: { email: string; url: string }[] = [];
 const reminders: { email: string; r: ReminderMail }[] = [];
+const updates: { email: string; n: UpdateNoticeMail }[] = [];
 
 let loginSeq = 0;
 async function loginAs(email: string): Promise<string> {
@@ -28,6 +29,7 @@ beforeAll(async () => {
     mailer: {
       async sendMagicLink(email, url) { captured.push({ email, url }); },
       async sendReminder(email, r) { reminders.push({ email, r }); },
+      async sendUpdateNotice(email, n) { updates.push({ email, n }); },
     },
   });
   await app.ready();
@@ -426,5 +428,73 @@ describe('Lasttest-Fix: /stats/public TTL-Cache', () => {
     } finally {
       await cachedApp.close();
     }
+  });
+});
+
+describe('Backlog 1 — Update-Benachrichtigung', () => {
+  async function setupProjectWithParticipants() {
+    updates.length = 0;
+    const owner = await loginAs('un1-up-owner@example.com');
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'un1 UpdateTest', startDate: at(0), endDate: at(12), visibility: 'PUBLIC' },
+    });
+    const id = res.json().id as string;
+    // Teilnehmer 1: eingeloggter User (locale en), bucht ZWEI Slots (Dedup-Probe)
+    await app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: 'un1-up-member@example.com', locale: 'en' }, remoteAddress: '10.8.0.9' });
+    const member = await loginAs('un1-up-member@example.com');
+    await app.inject({ method: 'POST', url: `/projects/${id}/slots`, cookies: { session: member }, payload: { startTime: at(1) } });
+    await app.inject({ method: 'POST', url: `/projects/${id}/slots`, cookies: { session: member }, payload: { startTime: at(2) } });
+    // Teilnehmer 2: Gast mit E-Mail (locale es)
+    await app.inject({ method: 'POST', url: `/projects/${id}/slots`,
+      payload: { startTime: at(3), guestName: 'Gast Es', guestEmail: 'un1-up-guest@example.com', locale: 'es' } });
+    // Teilnehmer 3: Gast OHNE E-Mail (bekommt nichts, crasht nichts)
+    await app.inject({ method: 'POST', url: `/projects/${id}/slots`,
+      payload: { startTime: at(4), guestName: 'Gast Ohne' } });
+    // Owner bucht selbst eine Stunde (darf sich NICHT selbst benachrichtigen)
+    await app.inject({ method: 'POST', url: `/projects/${id}/slots`, cookies: { session: owner }, payload: { startTime: at(5) } });
+    return { id, owner };
+  }
+
+  it('Owner-Update mailt Teilnehmer dedupliziert und lokalisiert, ohne Owner', async () => {
+    const { id, owner } = await setupProjectWithParticipants();
+    const post = await app.inject({
+      method: 'POST', url: `/projects/${id}/requests`, cookies: { session: owner },
+      payload: { text: 'Neuigkeiten: es geht voran!' },
+    });
+    expect(post.statusCode).toBe(200);
+    await vi.waitFor(() => expect(updates.length).toBe(2)); // Fan-out ist fire-and-forget
+    const byEmail = new Map(updates.map((u) => [u.email, u.n]));
+    expect(byEmail.has('un1-up-member@example.com')).toBe(true);
+    expect(byEmail.has('un1-up-guest@example.com')).toBe(true);
+    expect(byEmail.get('un1-up-member@example.com')!.locale).toBe('en');
+    expect(byEmail.get('un1-up-guest@example.com')!.locale).toBe('es');
+    expect(byEmail.get('un1-up-guest@example.com')!.text).toBe('Neuigkeiten: es geht voran!');
+    expect(byEmail.get('un1-up-guest@example.com')!.unsubscribeUrl).toContain(`/api/projects/${id}/updates/unsubscribe?`);
+  });
+
+  it('Unsubscribe-Link legt Opt-out an (idempotent), falsche Signatur 403, Folge-Update spart den Abgemeldeten aus', async () => {
+    const { id, owner } = await setupProjectWithParticipants();
+    const { unsubscribeSig } = await import('../lib/unsubscribe.js');
+    const sig = unsubscribeSig('dev-unsubscribe-secret', id, 'un1-up-guest@example.com');
+    const bad = await app.inject({ method: 'GET',
+      url: `/projects/${id}/updates/unsubscribe?email=${encodeURIComponent('un1-up-guest@example.com')}&sig=falsch&locale=es` });
+    expect(bad.statusCode).toBe(403);
+    for (let i = 0; i < 2; i++) { // idempotent
+      const ok = await app.inject({ method: 'GET',
+        url: `/projects/${id}/updates/unsubscribe?email=${encodeURIComponent('un1-up-guest@example.com')}&sig=${sig}&locale=es` });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.headers['content-type']).toContain('text/html');
+    }
+    const rows = await db.prisma.updateOptOut.findMany({ where: { projectId: id } });
+    expect(rows.length).toBe(1);
+    expect(rows[0].email).toBe('un1-up-guest@example.com');
+
+    updates.length = 0;
+    await app.inject({ method: 'POST', url: `/projects/${id}/requests`, cookies: { session: owner },
+      payload: { text: 'Zweites Update.' } });
+    await vi.waitFor(() => expect(updates.length).toBe(1));
+    expect(updates[0].email).toBe('un1-up-member@example.com');
   });
 });
