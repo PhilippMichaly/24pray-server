@@ -75,9 +75,9 @@ chown -R pray:pray /opt/24pray'
 ## 3. Code auf den Server (rsync, ohne lokale Artefakte)
 
 ```bash
-RS="rsync -az -e 'ssh -i ~/.ssh/24pray_vps -o IdentitiesOnly=yes' \
+RS="rsync -az --delete -e 'ssh -i ~/.ssh/24pray_vps -o IdentitiesOnly=yes' \
   --exclude node_modules --exclude .next --exclude .git \
-  --exclude data --exclude .env --exclude .env.local"
+  --exclude data --exclude .env --exclude .env.local --exclude .env.production"
 eval $RS ~/24pray-api/ root@$IP:/opt/24pray/api/
 eval $RS ~/24pray-web/ root@$IP:/opt/24pray/web/
 $SSH 'chown -R pray:pray /opt/24pray'
@@ -321,9 +321,9 @@ curl -v --url smtps://smtp.strato.de:465 --user 'no-reply@24pray.org:<PASSWORT>'
 
 ```bash
 IP=217.154.240.224
-RS="rsync -az -e 'ssh -i ~/.ssh/24pray_vps -o IdentitiesOnly=yes' \
+RS="rsync -az --delete -e 'ssh -i ~/.ssh/24pray_vps -o IdentitiesOnly=yes' \
   --exclude node_modules --exclude .next --exclude .git \
-  --exclude data --exclude .env --exclude .env.local"
+  --exclude data --exclude .env --exclude .env.local --exclude .env.production"
 eval $RS ~/24pray-api/ root@$IP:/opt/24pray/api/
 eval $RS ~/24pray-web/ root@$IP:/opt/24pray/web/
 ssh -i ~/.ssh/24pray_vps root@$IP '
@@ -349,6 +349,11 @@ Neue Prisma-Migrationen laufen beim API-Neustart automatisch (`ExecStartPre`).
 
 **Bekannte Fallen**
 
+- **`rsync` braucht `--delete`** (Befund beim Deploy 2026-07-27). Ohne das bleiben gelöschte
+  oder umbenannte Dateien auf dem Server liegen; nach dem SEO-Umbau existierten dadurch die
+  alte UND die neue Route parallel (`/projects/[id]` neben `/[locale]/projects/[id]`).
+  Ausgeschlossene Pfade (`node_modules`, `data`, `.env*`) sind vor dem Löschen geschützt —
+  rsync entfernt Excludes nur mit dem zusätzlichen `--delete-excluded`.
 - **`@`/Sonderzeichen in SMTP_URL** → percent-encodieren (`%40`), sonst schlägt der Verbindungsaufbau kryptisch fehl.
 - **Lokale Entwicklung:** nie `next build` neben laufendem `next dev` (teilen sich `.next/` — der Dev-Server verliert seine Assets, Seite lädt „leer"). Verwaiste Next-Prozesse findet `lsof` teils nicht → `ss -ltnp | grep :3000`.
 - `NEXT_PUBLIC_*`-Variablen werden **zur Build-Zeit** eingebacken — deshalb `/api` relativ halten; absolute URLs erzwingen Rebuilds.
