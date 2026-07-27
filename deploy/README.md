@@ -92,7 +92,7 @@ $SSH 'cd /opt/24pray/api && sudo -u pray npm ci --silent &&
 
 # Web: API-Basis ist RELATIV (/api) → überlebt Domain-Wechsel ohne Rebuild
 $SSH 'cd /opt/24pray/web &&
-  printf "NEXT_PUBLIC_API_URL=/api\n" | sudo -u pray tee .env.production >/dev/null &&
+  printf "NEXT_PUBLIC_API_URL=/api\nNEXT_PUBLIC_APP_URL=https://24pray.org\n" | sudo -u pray tee .env.production >/dev/null &&
   sudo -u pray npm ci --silent && sudo -u pray npx next build'
 ```
 
@@ -352,6 +352,16 @@ Neue Prisma-Migrationen laufen beim API-Neustart automatisch (`ExecStartPre`).
 - **`@`/Sonderzeichen in SMTP_URL** → percent-encodieren (`%40`), sonst schlägt der Verbindungsaufbau kryptisch fehl.
 - **Lokale Entwicklung:** nie `next build` neben laufendem `next dev` (teilen sich `.next/` — der Dev-Server verliert seine Assets, Seite lädt „leer"). Verwaiste Next-Prozesse findet `lsof` teils nicht → `ss -ltnp | grep :3000`.
 - `NEXT_PUBLIC_*`-Variablen werden **zur Build-Zeit** eingebacken — deshalb `/api` relativ halten; absolute URLs erzwingen Rebuilds.
+- **`NEXT_PUBLIC_APP_URL` ist die Ausnahme und MUSS absolut sein**: daraus bauen sich
+  Canonical-Tags, hreflang-Alternates und die Sitemap. Ist sie falsch, zeigen alle
+  Canonicals auf die falsche Domain und Google indexiert im schlimmsten Fall gar nichts.
+  Fällt sie weg, greift `https://24pray.org` als Default (`src/lib/routes.ts`) — bei einem
+  Domain-Wechsel also hier zwingend nachziehen und neu bauen.
+- Der Web-Dienst rendert öffentliche Seiten serverseitig und holt die Daten dafür über
+  `API_URL_INTERNAL` (Default `http://localhost:3001`, passt auf dem VPS). Nur wenn die API
+  je auf einen anderen Port/Host wandert, muss die Variable in die `24pray-web`-Unit.
+- `/robots.txt` und `/sitemap.xml` liefert **Next**, nicht nginx — beide Pfade dürfen dort
+  also nicht abgefangen oder auf statische Dateien umgebogen werden.
 - SQLite-Pfad: `DATABASE_URL` absolut angeben (`file:/opt/…`), Prisma löst relative Pfade gegen das Schema-Verzeichnis auf.
 - **`server.ts` liest `DATA_DIR`, NICHT `DATABASE_URL`** — die Env-Variable in
   Schritt 5 wird nur für `prisma migrate`/CLI-Aufrufe gebraucht; die App selbst baut
