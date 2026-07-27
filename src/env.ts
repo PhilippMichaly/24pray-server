@@ -24,6 +24,10 @@ const EnvSchema = z.object({
   FUNNEL_TOKEN: z.string().default(''),
   // Empfänger der Nutzer-Feedback-Mails (User-Zusatzpunkt). Leer = /feedback antwortet 404.
   FEEDBACK_TO: z.string().default(''),
+  // Empfänger der Betreiber-Benachrichtigungen (neue Wache / neues Konto / Buchung).
+  // Leer = Feature komplett aus, kein Versand. Wie FEEDBACK_TO: Adresse gehört nur nach
+  // /etc/24pray-api.env, nie ins öffentliche Repo.
+  ADMIN_NOTIFY_TO: z.string().default(''),
   // Web-Push VAPID (Backlog 7). Alle drei leer = Push-Feature aus (Routen 404, Hooks no-op).
   // Erzeugen: npx web-push generate-vapid-keys
   VAPID_PUBLIC_KEY: z.string().default(''),

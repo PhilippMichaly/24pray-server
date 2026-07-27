@@ -66,6 +66,40 @@ export interface UpdateNoticeMail {
   locale: string; // de|en|es|he|ar; Unbekanntes → de
 }
 
+/** Betreiber-Benachrichtigung: „jemand hat etwas angelegt". Empfänger ist ausschließlich
+ *  ADMIN_NOTIFY_TO (der Betreiber selbst) — deshalb bewusst nur Deutsch und mit Klartext-
+ *  Kontaktdaten, die der Betreiber ohnehin in seiner DB hat. Versand ist fire-and-forget,
+ *  siehe `adminNotify.ts`. */
+export type AdminNotice =
+  | {
+      kind: 'project_created';
+      title: string;
+      visibility: string; // PUBLIC | PRIVATE
+      startDate: string; // ISO
+      endDate: string; // ISO
+      timezone: string;
+      slotDurationMinutes: number;
+      language: string;
+      locationName?: string | null;
+      organizerName: string;
+      organizerEmail: string;
+      projectUrl: string;
+    }
+  | { kind: 'user_activated'; name: string; email: string; locale: string }
+  | {
+      kind: 'slot_booked';
+      projectTitle: string;
+      bookerName: string;
+      bookerEmail?: string | null;
+      isGuest: boolean;
+      isFirstBooking: boolean; // erste übernommene Stunde dieser Wache → im Betreff hervorgehoben
+      startTime: string; // ISO
+      timezone: string;
+      isAllDay: boolean;
+      bookedSlots: number; // Stand NACH dieser Buchung
+      projectUrl: string;
+    };
+
 /** Nutzer-Feedback (Footer-Dialog) → Mail an den Betreiber; bewusst KEINE DB-Speicherung. */
 export interface FeedbackMail {
   message: string; // User-Content — im HTML escapen!
@@ -104,6 +138,7 @@ export interface Mailer {
   sendProjectFarewell?(email: string, farewell: ProjectFarewellMail): Promise<void>;
   sendUpdateNotice?(email: string, notice: UpdateNoticeMail): Promise<void>;
   sendFeedback?(to: string, f: FeedbackMail): Promise<void>;
+  sendAdminNotice?(to: string, notice: AdminNotice): Promise<void>;
 }
 
 function formatReminderTime(r: { startTime: string; timezone: string; isAllDay?: boolean }): string {
@@ -130,6 +165,65 @@ function calendarBlock(googleUrl?: string, icsUrl?: string): { text: string; htm
   const text = `\n\nIn den Kalender eintragen:${googleUrl ? `\n  Google Kalender: ${googleUrl}` : ''}${icsUrl ? `\n  Andere Kalender (.ics): ${icsUrl}` : ''}`;
   const html = `<p>In den Kalender eintragen:${googleUrl ? ` <a href="${googleUrl}">Google&nbsp;Kalender</a>` : ''}${googleUrl && icsUrl ? ' · ' : ''}${icsUrl ? `<a href="${icsUrl}">Andere Kalender (.ics)</a>` : ''}</p>`;
   return { text, html };
+}
+
+/** Datum+Uhrzeit für Betreiber-Mails (immer deutsch, Wache-Zeitzone). */
+function formatAdminDate(iso: string, timezone: string, dateOnly = false): string {
+  return new Intl.DateTimeFormat('de-DE', {
+    timeZone: timezone,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    ...(dateOnly ? {} : { hour: '2-digit', minute: '2-digit' }),
+  }).format(new Date(iso));
+}
+
+/** Betreiber-Notice → Betreff + Zeilen. Eine Stelle, damit Text und HTML nie auseinanderlaufen. */
+function renderAdminNotice(n: AdminNotice): { subject: string; lines: string[] } {
+  switch (n.kind) {
+    case 'project_created': {
+      const unit = n.slotDurationMinutes === 1440 ? 'Tages-Wache' : `${n.slotDurationMinutes}-Minuten-Slots`;
+      return {
+        subject: `24pray — neue Gebetswache: „${n.title}"`,
+        lines: [
+          `Titel: ${n.title}`,
+          `Sichtbarkeit: ${n.visibility}`,
+          `Zeitraum: ${formatAdminDate(n.startDate, n.timezone, true)} – ${formatAdminDate(n.endDate, n.timezone, true)} (${n.timezone})`,
+          `Aufteilung: ${unit}`,
+          `Sprache: ${n.language}`,
+          `Ort: ${n.locationName || '—'}`,
+          `Ersteller: ${n.organizerName} <${n.organizerEmail}>`,
+          `Link: ${n.projectUrl}`,
+        ],
+      };
+    }
+    case 'user_activated':
+      return {
+        subject: `24pray — neues Konto: ${n.email}`,
+        lines: [
+          'Erster erfolgreicher Login (nicht bloß ein angeforderter Magic-Link).',
+          `Name: ${n.name}`,
+          `E-Mail: ${n.email}`,
+          `Sprache: ${n.locale}`,
+        ],
+      };
+    case 'slot_booked': {
+      const when = formatAdminDate(n.startTime, n.timezone, n.isAllDay);
+      return {
+        subject: n.isFirstBooking
+          ? `24pray — ERSTE Stunde übernommen: „${n.projectTitle}"`
+          : `24pray — Stunde übernommen: „${n.projectTitle}" (${n.bookedSlots}.)`,
+        lines: [
+          ...(n.isFirstBooking ? ['Die erste Stunde dieser Wache ist vergeben — die Kette lebt.'] : []),
+          `Wache: ${n.projectTitle}`,
+          `Zeit: ${when} (${n.timezone})`,
+          `Wer: ${n.bookerName}${n.bookerEmail ? ` <${n.bookerEmail}>` : ''}${n.isGuest ? ' (Gast)' : ' (Konto)'}`,
+          `Übernommene Stunden gesamt: ${n.bookedSlots}`,
+          `Link: ${n.projectUrl}`,
+        ],
+      };
+    }
+  }
 }
 
 export interface MailerConfig {
@@ -163,6 +257,9 @@ export function createMailer(config: MailerConfig): Mailer {
       },
       async sendFeedback(to, f) {
         console.log(`[mailer:dev] feedback for ${to} (replyTo: ${f.replyTo ?? '-'}, page: ${f.page ?? '-'})`);
+      },
+      async sendAdminNotice(to, n) {
+        console.log(`[mailer:dev] admin notice for ${to}: ${renderAdminNotice(n).subject}`);
       },
     };
   }
@@ -270,6 +367,16 @@ export function createMailer(config: MailerConfig): Mailer {
         subject: `24pray — Nutzer-Feedback${f.page ? ` (${f.page})` : ''}`,
         text: `${f.message}\n\n—\nSeite: ${f.page ?? '-'}\nAntwort-Adresse: ${f.replyTo ?? 'keine angegeben'}`,
         html: `<blockquote style="margin:0;padding-inline-start:12px;border-inline-start:3px solid #ccc;white-space:pre-wrap">${escapeHtml(f.message)}</blockquote><p style="font-size:12px;color:#888">Seite: ${escapeHtml(f.page ?? '-')} · Antwort-Adresse: ${escapeHtml(f.replyTo ?? 'keine angegeben')}</p>`,
+      });
+    },
+    async sendAdminNotice(to, n) {
+      const { subject, lines } = renderAdminNotice(n);
+      await transport.sendMail({
+        from: config.from,
+        to,
+        subject,
+        text: lines.join('\n'),
+        html: `<ul style="padding-inline-start:18px">${lines.map((l) => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`,
       });
     },
   };

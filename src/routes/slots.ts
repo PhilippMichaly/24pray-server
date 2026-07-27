@@ -9,6 +9,7 @@ import { requireUser } from '../plugins/auth.js';
 import { BookSlotBody } from '../schemas/slots.js';
 import { buildSlotGrid, slotLengthMs, type BookedSlotInput } from '../lib/slotGrid.js';
 import { canReadProject, ensureMembership } from '../lib/access.js';
+import { notifyAdmin } from '../lib/adminNotify.js';
 import { bumpFunnel } from './funnel.js';
 
 function httpError(status: number, message: string) {
@@ -153,6 +154,26 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         timezone: project.timezone,
         isAllDay: project.slotDurationMinutes === 1440,
       }).catch((err) => console.error(`[mail] booking notice failed for slot ${slot.id}:`, err));
+    }
+
+    // Betreiber-Benachrichtigung: jede Buchung, die erste einer Wache im Betreff hervorgehoben.
+    // Der Zähler läuft nur, wenn das Feature überhaupt scharf ist — sonst wäre es eine
+    // zusätzliche COUNT-Query pro Buchung ohne jeden Nutzen (Lasttest-Pfad).
+    if (env?.ADMIN_NOTIFY_TO) {
+      const bookedSlots = await prisma.prayerSlot.count({ where: { projectId: id, status: 'BOOKED' } });
+      notifyAdmin({ mailer, env }, {
+        kind: 'slot_booked',
+        projectTitle: project.title,
+        bookerName: req.user?.name ?? body.guestName ?? '',
+        bookerEmail: userId ? (req.user?.email ?? null) : slot.guestEmail,
+        isGuest: !userId,
+        isFirstBooking: bookedSlots === 1,
+        startTime: slot.startTime.toISOString(),
+        timezone: project.timezone,
+        isAllDay: project.slotDurationMinutes === 1440,
+        bookedSlots,
+        projectUrl: `${env.APP_URL}/projects/${project.id}`,
+      });
     }
     return slot;
   });

@@ -119,6 +119,10 @@ UNSUBSCRIBE_SECRET=
 FUNNEL_TOKEN=
 # Empfaenger der Nutzer-Feedback-Mails (Footer-Dialog) — leer = Feature aus (404)
 FEEDBACK_TO=
+# Betreiber-Benachrichtigungen: neue Wache, neues Konto, jede Buchung.
+# Leer = kein Versand. Achtung: diese Mails enthalten Klartext-Namen und -Adressen der
+# Nutzer — nur an ein Postfach schicken, das du selbst kontrollierst.
+ADMIN_NOTIFY_TO=
 # Web-Push VAPID (Backlog 7) — erzeugen mit: npx web-push generate-vapid-keys; leer = Push aus
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=

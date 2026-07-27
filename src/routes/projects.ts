@@ -5,6 +5,7 @@ import { requireUser } from '../plugins/auth.js';
 import { CreateProjectBody, ShiftProjectBody, UpdateProjectBody } from '../schemas/projects.js';
 import { toProjectWithStats, toProjectListWithStats } from '../lib/projectView.js';
 import { canReadProject, ensureMembership } from '../lib/access.js';
+import { notifyAdmin } from '../lib/adminNotify.js';
 import type { Mailer } from '../lib/mailer.js';
 import type { Env } from '../env.js';
 
@@ -92,6 +93,22 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
       include: { organizer: true },
     });
     await ensureMembership(prisma, user.id, project.id, 'ORGANIZER'); // W3.2
+
+    notifyAdmin({ mailer, env }, {
+      kind: 'project_created',
+      title: project.title,
+      visibility: project.visibility,
+      startDate: project.startDate.toISOString(),
+      endDate: project.endDate.toISOString(),
+      timezone: project.timezone,
+      slotDurationMinutes: project.slotDurationMinutes,
+      language: project.language,
+      locationName: project.locationName,
+      organizerName: project.organizer.name,
+      organizerEmail: project.organizer.email,
+      projectUrl: `${env?.APP_URL ?? ''}/projects/${project.id}`,
+    });
+
     return toProjectWithStats(prisma, project, user.id);
   });
 

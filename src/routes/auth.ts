@@ -5,6 +5,7 @@ import type { Env } from '../env.js';
 import { generateToken, generateLoginCode, hashToken } from '../lib/tokens.js';
 import { MagicLinkBody, VerifyBody, VerifyCodeBody, SESSION_COOKIE } from '../schemas/auth.js';
 import { requireUser } from '../plugins/auth.js';
+import { notifyAdmin } from '../lib/adminNotify.js';
 
 const MAGIC_TTL_MS = 15 * 60 * 1000;
 // Grace-Fenster, in dem ein konsumierter Magic-Token idempotent erneut Erfolg liefert (§6.4).
@@ -73,6 +74,16 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     await prisma.session.create({ data: { token: hashToken(raw), userId, expiresAt } });
 
     const u = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+
+    // Betreiber-Benachrichtigung „neues Konto": bewusst HIER und nicht beim Magic-Link-Upsert.
+    // Dort entsteht der User-Datensatz schon durch bloßes Eintippen einer fremden Adresse —
+    // eine Mail an dieser Stelle wäre von außen auslösbar. Erst der eingelöste Login beweist,
+    // dass jemand tatsächlich Zugriff auf das Postfach hat. Deckt Link- und Code-Login ab.
+    if (!u.activatedAt) {
+      await prisma.user.update({ where: { id: u.id }, data: { activatedAt: new Date() } });
+      notifyAdmin(deps, { kind: 'user_activated', name: u.name, email: u.email, locale: u.locale });
+    }
+
     reply.setCookie(SESSION_COOKIE, raw, {
       httpOnly: true, sameSite: 'lax', secure: env.COOKIE_SECURE, path: '/', expires: expiresAt,
     });

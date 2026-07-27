@@ -15,6 +15,10 @@ model User {
   telegramChatId String?
   locale         String         @default("de") // UI-Sprache (de|en|es|he|ar) für lokalisierte Mails; bei jedem Login aktualisiert (Backlog 1)
   createdAt      DateTime       @default(now())
+  // Zeitpunkt des ERSTEN erfolgreichen Logins. createdAt entsteht schon beim Anfordern eines
+  // Magic-Links (upsert) — jeder könnte damit fremde Adressen eintippen. Erst dieses Feld
+  // markiert ein echtes Konto und löst genau einmal die Betreiber-Benachrichtigung aus.
+  activatedAt    DateTime?
   projects       PrayerProject[] @relation("OrganizerProjects")
   slots          PrayerSlot[]
   magicTokens    MagicToken[]

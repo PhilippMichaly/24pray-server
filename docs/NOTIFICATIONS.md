@@ -28,6 +28,7 @@ Legende Zellen:
 | Eingeloggter Bucher | Ja | `src/routes/slots.test.ts:318` „eingeloggter Bucher bekommt Bestätigungs-Mail an die Konto-Adresse (Live-Befund 2026-07-09)" | Nein — bewusst | eigene Aktion, Ergebnis direkt in der UI sichtbar |
 | Owner | Ja (nur bei Fremd-/Gastbuchung + `notifyOnBooking`-Flag) | `src/routes/slots.test.ts:192` „wb-notifyOnBooking: Owner bekommt Mail bei Fremd-/Gastbuchung, nicht bei Eigenbuchung, nicht wenn Flag aus" | Nein — OFFEN | Kandidat: Owner-Push bei Fremdbuchung (siehe unten) |
 | Teilnehmer (andere) | n/a | Ereignis betrifft nur Bucher + Owner, keine weiteren Teilnehmer | n/a | — |
+| Betreiber (`ADMIN_NOTIFY_TO`) | Ja (jede Buchung; erste Stunde der Wache im Betreff hervorgehoben) | `src/routes/adminNotice.test.ts:119` „jede Buchung meldet sich; die erste Stunde einer Wache ist als solche markiert" | Nein — bewusst | kein Push-Kanal für den Betreiber vorgesehen (er hat kein Konto in der App) |
 
 ### 2. Stunden-Erinnerung (`sendDueReminders`, `src/lib/jobs.ts:20`, Cron-Tick alle 60s)
 
@@ -86,6 +87,7 @@ enthält keinen `mailer`- oder `pushToUsers`-Aufruf. Nicht implementiert, nicht 
 | Rolle | Mail | Beweis | Push | Beweis |
 |---|---|---|---|---|
 | Jede Rolle (Login ist rollenneutral, vor Session-Erstellung) | Ja | `src/routes/auth.test.ts:32` „full cycle: magic-link -> verify -> me -> logout" (prüft `captured` = `sendMagicLink`-Aufruf); zusätzlich `src/routes/auth.test.ts:73` „Code-Login: Mail enthält 6-stelligen Code, /auth/verify-code loggt ein" | Nein — technisch unmöglich | Push setzt eine bestehende Session/Konto-Bindung voraus — vor Login nicht adressierbar |
+| Betreiber (`ADMIN_NOTIFY_TO`) | Ja — aber nur beim ERSTEN erfolgreichen Login je Konto | `src/routes/adminNotice.test.ts:69` „erster erfolgreicher Login meldet ein neues Konto — jeder weitere Login nicht mehr". Bewusst in `createSession` (deckt Link- und Code-Login) und NICHT im Magic-Link-Upsert: dort entsteht der User-Datensatz schon durch Eintippen einer fremden Adresse, die Mail wäre von außen auslösbar — Gegenbeweis `src/routes/adminNotice.test.ts:87` | Nein — bewusst | kein Push-Kanal für den Betreiber |
 
 ### 8. Feedback (`POST /feedback`, `src/routes/feedback.ts:17`)
 
@@ -93,6 +95,21 @@ enthält keinen `mailer`- oder `pushToUsers`-Aufruf. Nicht implementiert, nicht 
 |---|---|---|---|---|
 | Betreiber (`FEEDBACK_TO`) | Ja | `src/routes/feedback.test.ts:26` „valides Feedback → 204, Mail an FEEDBACK_TO mit replyTo und page" | n/a | kein Push-Kanal für den Betreiber vorgesehen |
 | Feedback-Absender (Gast oder eingeloggt) | Nein — bewusst | Endpoint ist ein Fire-and-Forget-Meldekanal, kein Dialog; Absender erhält HTTP 204 als Bestätigung | Nein — bewusst | dito |
+
+### 9. Wache angelegt (`POST /projects`, `src/routes/projects.ts:64`)
+
+| Rolle | Mail | Beweis | Push | Beweis |
+|---|---|---|---|---|
+| Betreiber (`ADMIN_NOTIFY_TO`) | Ja | `src/routes/adminNotice.test.ts:97` „neue Wache meldet Titel, Sichtbarkeit, Zeitraum, Ersteller und Link" | Nein — bewusst | kein Push-Kanal für den Betreiber |
+| Ersteller (Akteur) | Nein — bewusst | eigene Aktion, Ergebnis direkt in der UI sichtbar | Nein — bewusst | eigene Aktion |
+| Teilnehmer | n/a | zum Zeitpunkt des Anlegens hat die Wache noch keine Teilnehmer | n/a | — |
+
+**Gemeinsam für alle Betreiber-Zellen (Ereignisse 1, 7, 9):** Versand über `notifyAdmin`
+(`src/lib/adminNotify.ts`) — synchron aufgerufen, aber bewusst ohne `await`, damit eine
+Info-Mail die Nutzer-Aktion nie verzögert oder kippt. Fail-closed ohne `ADMIN_NOTIFY_TO`
+(Beweis: `src/routes/adminNotice.test.ts:164` sowie die Unit-Tests in
+`src/lib/adminNotify.test.ts`). Die Mails enthalten Klartext-Namen und -Adressen — siehe
+Datenschutz-Hinweis im Web-Repo.
 
 ## Offene Zellen (Merkposten)
 
