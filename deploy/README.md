@@ -291,6 +291,15 @@ Verifikation: `curl -i https://24pray.org/api/health`, `http://` → 301,
 Magic-Link-Response enthält `https://24pray.org/...`, Set-Cookie hat
 `HttpOnly; Secure; SameSite=Lax`.
 
+**www → Apex (SEO, seit 2026-10-12):** Nach certbot zwei Stellen in `/etc/nginx/sites-available/24pray`
+anpassen, sonst liefert `www.24pray.org` die Seite als Duplikat aus:
+
+- im 443-Block direkt nach `server_name`:
+  `if ($host = www.24pray.org) { return 301 https://24pray.org$request_uri; }`
+- im 80-Block den certbot-Redirect für www von `https://$host…` auf `https://24pray.org$request_uri` ändern
+
+Verifikation: `curl -sI https://www.24pray.org/de` → `301`, `location: https://24pray.org/de`.
+
 ## 10. Echte Mails (SMTP)
 
 Postfach `no-reply@24pray.org` beim Mail-Provider anlegen (hier: Strato).
