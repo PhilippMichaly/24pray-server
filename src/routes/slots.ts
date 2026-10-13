@@ -160,7 +160,8 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     // Der Zähler läuft nur, wenn das Feature überhaupt scharf ist — sonst wäre es eine
     // zusätzliche COUNT-Query pro Buchung ohne jeden Nutzen (Lasttest-Pfad).
     if (env?.ADMIN_NOTIFY_TO) {
-      const bookedSlots = await prisma.prayerSlot.count({ where: { projectId: id, status: 'BOOKED' } });
+      // COMPLETED mitzählen: sonst gilt nach vergangenen Stunden eine spätere Buchung als „erste".
+      const bookedSlots = await prisma.prayerSlot.count({ where: { projectId: id, status: { in: ['BOOKED', 'COMPLETED'] } } });
       notifyAdmin({ mailer, env }, {
         kind: 'slot_booked',
         projectTitle: project.title,

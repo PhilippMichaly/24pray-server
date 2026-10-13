@@ -105,6 +105,30 @@ describe('projects', () => {
     expect(list.find((p: { id: string }) => p.id === empty.id).totalSlots).toBe(3);
   });
 
+  it('bookedSlots zählt vergangene (COMPLETED) Stunden mit, CANCELLED nicht', async () => {
+    // Der Completion-Job setzt gehaltene Stunden auf COMPLETED. Zählte die Statistik nur
+    // BOOKED, fiele „X von Y Stunden gehalten" während der Wache und stünde danach auf 0.
+    const ella = await loginAs('ella-completed@example.com');
+    const proj = (await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: ella },
+      payload: { title: 'Gehalten', startDate: future(1), endDate: future(5), visibility: 'PUBLIC' },
+    })).json();
+    for (const h of [1, 2, 3]) {
+      await app.inject({
+        method: 'POST', url: `/projects/${proj.id}/slots`, cookies: { session: ella },
+        payload: { startTime: future(h) },
+      });
+    }
+    const slots = await db.prisma.prayerSlot.findMany({ where: { projectId: proj.id }, orderBy: { startTime: 'asc' } });
+    await db.prisma.prayerSlot.update({ where: { id: slots[0].id }, data: { status: 'COMPLETED' } });
+    await db.prisma.prayerSlot.update({ where: { id: slots[1].id }, data: { status: 'CANCELLED' } });
+
+    const list = (await app.inject({ method: 'GET', url: '/projects', cookies: { session: ella } })).json();
+    expect(list.find((p: { id: string }) => p.id === proj.id).bookedSlots).toBe(2);
+    const single = (await app.inject({ method: 'GET', url: `/projects/${proj.id}`, cookies: { session: ella } })).json();
+    expect(single.bookedSlots).toBe(2);
+  });
+
   it('Gruppen-Links: gültige Dienst-URLs werden gespeichert und ausgeliefert', async () => {
     const eva = await loginAs('eva-links@example.com');
     const create = await app.inject({

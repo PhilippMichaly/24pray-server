@@ -1,6 +1,10 @@
 import type { PrismaClient, PrayerProject } from '@prisma/client';
 import { maskName } from './slotGrid.js';
 
+/** Gehaltene Stunden: noch anstehend (BOOKED) oder schon vorbei (COMPLETED, setzt der
+ *  Completion-Job). Nur BOOKED zu zählen ließ „X von Y gehalten" während der Wache sinken. */
+const HELD_STATUSES = ['BOOKED', 'COMPLETED'];
+
 export interface ProjectWithStats {
   id: string;
   title: string;
@@ -37,7 +41,7 @@ export async function toProjectListWithStats(
 ): Promise<ProjectWithStats[]> {
   const counts = await prisma.prayerSlot.groupBy({
     by: ['projectId'],
-    where: { projectId: { in: projects.map((p) => p.id) }, status: 'BOOKED' },
+    where: { projectId: { in: projects.map((p) => p.id) }, status: { in: HELD_STATUSES } },
     _count: { _all: true },
   });
   const byProject = new Map(counts.map((c) => [c.projectId, c._count._all]));
@@ -59,7 +63,7 @@ export async function toProjectWithStats(
   const bookedSlots =
     precomputedBookedSlots ??
     (await prisma.prayerSlot.count({
-      where: { projectId: project.id, status: 'BOOKED' },
+      where: { projectId: project.id, status: { in: HELD_STATUSES } },
     }));
   const slotMs = project.slotDurationMinutes * 60 * 1000;
   const totalSlots = Math.max(
