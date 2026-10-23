@@ -187,7 +187,7 @@ export function projectRoutes(
     const { token } = req.params as { token: string };
     const project = await prisma.prayerProject.findUnique({ where: { inviteToken: token }, include: { organizer: true } });
     if (!project) throw httpError(404, 'Einladung ungültig');
-    return toProjectWithStats(prisma, project, undefined);
+    return toProjectWithStats(prisma, project, req.user?.id);
   });
 
   // Einladungslink erneuern (organizer only): alter Token ist sofort tot, Mitglieder behalten Zugang.

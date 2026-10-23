@@ -343,6 +343,35 @@ describe('projects', () => {
     const bad = await app.inject({ method: 'GET', url: '/join/does-not-exist' });
     expect(bad.statusCode).toBe(404);
   });
+
+  it('join: Mitglied sieht den Organisator im Klartext, nur der Organisator bekommt den inviteToken (Minor 6)', async () => {
+    const olga = await loginAs('olga-join@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: olga },
+      payload: { title: 'Diskret per Link', startDate: future(1), endDate: future(2), visibility: 'PRIVATE', maskNames: true },
+    });
+    const { id: projectId, inviteToken } = create.json();
+    const memberCookie = await loginAs('mia-join@example.com');
+    const member = await db.prisma.user.findUniqueOrThrow({ where: { email: 'mia-join@example.com' } });
+    await db.prisma.membership.create({ data: { userId: member.id, projectId, role: 'MEMBER' } });
+    const stranger = await loginAs('sam-join@example.com');
+    const join = (session?: string) =>
+      app.inject({ method: 'GET', url: `/join/${inviteToken}`, ...(session ? { cookies: { session } } : {}) });
+
+    const asOrganizer = (await join(olga)).json();
+    expect(asOrganizer.inviteToken).toBe(inviteToken);
+
+    const asMember = (await join(memberCookie)).json();
+    expect(asMember.organizerName).toBe('olga-join');
+    expect(asMember.inviteToken).toBe('');
+
+    const asStranger = (await join(stranger)).json();
+    expect(asStranger.organizerName).toBe('ol…');
+    expect(asStranger.inviteToken).toBe('');
+
+    const anon = (await join()).json();
+    expect(anon.inviteToken).toBe('');
+  });
 });
 
 describe('wk-POST /projects/:id/shift — Wache verschieben (Ersteller-Lebenszyklus)', () => {
