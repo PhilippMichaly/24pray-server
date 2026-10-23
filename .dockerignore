@@ -1,0 +1,17 @@
+# Build-Kontext nur aus versioniertem Quellcode: keine Host-Artefakte, keine Secrets,
+# keine lokalen Datenbanken (R14). node_modules/dist entstehen im Image per npm ci/build.
+node_modules
+dist
+data
+.env
+.env.*
+!.env.example
+.git
+.github
+.superpowers
+*.db
+*.db-*
+**/*.db
+**/*.db-*
+coverage
+docs
