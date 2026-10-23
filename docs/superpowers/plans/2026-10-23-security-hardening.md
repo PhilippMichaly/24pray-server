@@ -31,12 +31,17 @@
 
 ## Deploy-Reihenfolge
 
-1. Task 0 (Backup + Bestands-SQL) auf Prod, **vor** jedem Code-Deploy.
-2. `/etc/24pray-api.env` ergänzen (Task 2 Step 7) **vor** dem API-Deploy von Task 2, sonst startet die API nicht.
-3. API-Release 1: Tasks 1–5, 8, 10–13. Web-Release 1 gleichzeitig: Tasks 15 (Header-Variante des guestTokens funktioniert, weil API beides akzeptiert), 14, 16.
-4. API + Web gemeinsam: Tasks 6/6b, 7/7b, 9/9b.
-5. Task 17 (nginx/systemd/cron) nach Freigabe.
-6. Task 18 sofort, Tasks 19 und 20 je als eigener Branch und eigenes Release.
+Korrigiert nach dem Abschluss-Review (final-review.md §4): ein Release pro Repo, nicht mehr nach Tasks getrennt.
+
+**Vorbedingungen vor dem ersten Restart** (Prod lesend geprüft, 23.10.): `UNSUBSCRIBE_SECRET` ≥ 32 Zeichen, `SMTP_URL` als `smtps://…:465`, `DEV_LOGIN_RESPONSE`/`HOST` nicht gesetzt, Node ≥ 22, `sqlite3`, Migration `20260727120000` angewendet, Backup vom 23.10. liegt vor — alles erfüllt. **Offen: `SELFCHECK_TO` fehlt in `/etc/24pray-api.env`.** Migration `20261023103400` läuft per `ExecStartPre` beim Restart.
+
+1. Task 0 (Backup + Bestands-SQL) — erledigt.
+2. `SELFCHECK_TO` in `/etc/24pray-api.env` eintragen (Runbook Schritt 1–3). Kein Restart nötig. **Muss vor dem Selfcheck-Skript (Schritt 5) stehen**, sonst verstummt das Monitoring still.
+3. **API**: `fix/security-hardening` (empfohlen inkl. `chore/fastify-5`) mergen, rsync mit Excludes `.superpowers`, `docs`, `coverage`, `npm ci && npx prisma generate && npm run build`, Unit installieren, `daemon-reload`, `restart` (wendet `20261023103400` an). Danach Runbook Schritt 6: Health, Journal-Hinweis `EAFNOSUPPORT|EPERM|SIGSYS`, bei Fehler Auto-Rollback. Die API lauscht danach nur noch auf 127.0.0.1.
+4. **Web sofort danach**: `fix/security-hardening` (empfohlen inkl. `chore/next-upgrade`), rsync, `npm ci && npm run build`, `restart 24pray-web`. Reihenfolge zwingend **API, dann sofort Web**: altes Web + neue API → Gastbuchung in PRIVATE-Wachen 404; neues Web + alte API → Gast-Storno 403. Fenster klein halten.
+5. nginx (Runbook Schritt 4–5) und Selfcheck-Skript (Schritt 7) — unabhängig von 3/4, das Skript aber erst nach Schritt 2.
+6. **Verifikation**: `curl -sI https://24pray.org/de` (5 Security-Header, kein `X-Powered-By`, kein Versions-Banner); Magic-Link-Login einmal durchspielen (SMTP unter der Sandbox); Gastbuchung in einer PRIVATE-Wache per Link; Gast-Storno; `journalctl -u 24pray-api` ohne EPERM; nach ≤ 1 h Cleanup-Zeile `[jobs] cleanup: 0 … 1 Gast-Adressen`.
+7. Push: CI (Task 16) läuft erst auf GitHub — `gh run watch`.
 
 ## Modellzuordnung
 
