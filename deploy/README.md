@@ -232,14 +232,21 @@ curl -s -X POST http://$IP/api/auth/magic-link \
 ## 8. Backup (täglich, 14 Tage Rotation)
 
 ```bash
-$SSH 'cat > /etc/cron.daily/24pray-backup <<EOF
+$SSH 'cat > /etc/cron.daily/24pray-backup <<'"'"'EOF'"'"'
 #!/bin/sh
-d=\$(date +%F)
-cp /opt/24pray/data/24pray.db /opt/24pray/backup/24pray-\$d.db 2>/dev/null
+d=$(date +%F)
+umask 077
+sqlite3 /opt/24pray/data/24pray.db ".backup '"'"'/opt/24pray/backup/24pray-$d.db'"'"'"
 find /opt/24pray/backup -name "24pray-*.db" -mtime +14 -delete
 EOF
-chmod +x /etc/cron.daily/24pray-backup'
+chmod +x /etc/cron.daily/24pray-backup
+chmod 700 /opt/24pray/backup'
 ```
+
+`sqlite3 .backup` liefert einen konsistenten Snapshot auch bei laufendem Schreibbetrieb
+(ein `cp` kann bei WAL eine inkonsistente Datei ergeben); `umask 077` und das
+Verzeichnis `0700` halten die Backups privat. Voraussetzung: `sqlite3` ist installiert.
+Der Off-site-Pull (rrsync als root) liest weiterhin `24pray-*.db` aus `/opt/24pray/backup`.
 
 Restore: Dienst stoppen → Backup-Datei nach `/opt/24pray/data/24pray.db`
 kopieren → `systemctl start 24pray-api`.
