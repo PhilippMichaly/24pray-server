@@ -217,6 +217,8 @@ export function slotRoutes(
     const base = await prisma.prayerSlot.findUnique({ where: { id }, include: { project: true } });
     if (!base) throw httpError(404, 'Slot nicht gefunden');
     if (base.userId !== user.id) throw httpError(403, 'Nur der eigene Slot kann wiederholt werden');
+    // Ex-Mitglied (Membership entfernt, Slot bleibt) darf in PRIVATE-Wachen nicht weiterbuchen — vor den 409ern, kein Orakel.
+    if (!(await canReadProject(prisma, base.project, req.user))) throw httpError(404, 'Projekt nicht gefunden');
     // Nur eine bestehende Buchung in einer aktiven Wache lässt sich fortschreiben.
     if (base.status !== 'BOOKED') throw httpError(409, 'Nur eine bestehende Buchung kann wiederholt werden');
     if (base.project.status !== 'ACTIVE') throw httpError(409, 'Diese Gebetswache nimmt gerade keine Buchungen an');

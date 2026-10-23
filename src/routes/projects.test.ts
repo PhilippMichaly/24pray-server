@@ -757,4 +757,21 @@ describe('Task 7 — Einladungslink erneuern, Mitglied entfernen', () => {
     expect((await app.inject({ method: 'DELETE', url: `/projects/${id}/members/${orgaUser.id}`, cookies: { session: orga } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'DELETE', url: `/projects/${id}/members/${userId}`, cookies: { session } })).statusCode).toBe(403);
   });
+
+  it('Ex-Mitglied kann per recur aus uebrig gebliebenem Slot nichts mehr anlegen (404, keine neuen Slots)', async () => {
+    const orga = await loginAs('t7-recur-orga@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'T7recur', startDate: future(1), endDate: new Date(NOW + 30 * DAY).toISOString(), visibility: 'PRIVATE' },
+    });
+    const id = create.json().id as string;
+    const { session, userId } = await addMember('t7-recur-member@example.com', id);
+    const slot = await db.prisma.prayerSlot.create({
+      data: { projectId: id, userId, startTime: new Date(future(1)), endTime: new Date(future(2)), status: 'BOOKED' },
+    });
+    await app.inject({ method: 'DELETE', url: `/projects/${id}/members/${userId}`, cookies: { session: orga } });
+    const res = await app.inject({ method: 'POST', url: `/slots/${slot.id}/recur`, cookies: { session } });
+    expect(res.statusCode).toBe(404);
+    expect(await db.prisma.prayerSlot.count({ where: { projectId: id } })).toBe(1);
+  });
 });
