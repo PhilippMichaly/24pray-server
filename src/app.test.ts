@@ -49,6 +49,21 @@ describe('CORS origins', () => {
     expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3002');
   });
 
+  it('erlaubt die Token-Header X-Guest-Token und Authorization im Preflight', async () => {
+    const res = await app.inject({
+      method: 'OPTIONS',
+      url: '/slots/x',
+      headers: {
+        origin: 'http://localhost:3000',
+        'access-control-request-method': 'DELETE',
+        'access-control-request-headers': 'x-guest-token,authorization',
+      },
+    });
+    const allowed = String(res.headers['access-control-allow-headers']).toLowerCase();
+    expect(allowed).toContain('x-guest-token');
+    expect(allowed).toContain('authorization');
+  });
+
   it('verweigert eine fremde Origin', async () => {
     const res = await allowOrigin('https://evil.example.com');
     expect(res.headers['access-control-allow-origin']).toBeUndefined();

@@ -1,5 +1,6 @@
 import type { PrismaClient, PrayerProject } from '@prisma/client';
 import type { AuthedUser } from '../plugins/auth.js';
+import { safeEqual } from './tokens.js';
 
 /**
  * Lese-Zugriff auf ein Projekt (W3 / Private-Gast-Gap):
@@ -14,7 +15,7 @@ export async function canReadProject(
 ): Promise<boolean> {
   if (project.visibility === 'PUBLIC') return true;
   if (user?.id === project.organizerId) return true;
-  if (inviteToken && inviteToken === project.inviteToken) return true;
+  if (inviteToken && project.inviteToken && safeEqual(inviteToken, project.inviteToken)) return true;
   if (user) {
     const member = await prisma.membership.findUnique({
       where: { userId_projectId: { userId: user.id, projectId: project.id } },

@@ -279,6 +279,24 @@ describe('slots', () => {
     const ok = await app.inject({ method: 'DELETE', url: `/slots/${slotId}?guestToken=${guestToken}` });
     expect(ok.statusCode).toBe(204);
   });
+
+  it('Gast-Storno per Header X-Guest-Token: richtig 204, falsch/doppelt/leer 403', async () => {
+    const alice = await loginAs('alice-guest-hdr@example.com');
+    const projectId = await makeProject(alice);
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${projectId}/slots`,
+      payload: { startTime: at(5), guestName: 'Gast Hanna', guestEmail: 'hanna@example.com' },
+    });
+    const { id: slotId, guestToken } = book.json();
+    const del = (headers: Record<string, string | string[]>) =>
+      app.inject({ method: 'DELETE', url: `/slots/${slotId}`, headers });
+
+    expect((await del({ 'x-guest-token': 'nope' })).statusCode).toBe(403);
+    expect((await del({ 'x-guest-token': '' })).statusCode).toBe(403);
+    expect((await del({ 'x-guest-token': [guestToken, guestToken] })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url: `/slots/${slotId}` })).statusCode).toBe(403);
+    expect((await del({ 'x-guest-token': guestToken })).statusCode).toBe(204);
+  });
 });
 
 function gslotName(s: { userName: string | null }): string | null {

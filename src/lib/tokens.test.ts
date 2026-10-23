@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateToken, hashToken } from './tokens.js';
+import { generateToken, hashToken, safeEqual } from './tokens.js';
 
 describe('tokens', () => {
   it('generates a long random url-safe token', () => {
@@ -14,5 +14,14 @@ describe('tokens', () => {
     expect(h).toBe(hashToken(t));
     expect(h).not.toBe(t);
     expect(h).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe('safeEqual', () => {
+  it('vergleicht Strings timing-sicher, auch bei ungleicher Länge ohne Throw', () => {
+    expect(safeEqual('a', 'a')).toBe(true);
+    expect(safeEqual('a', 'b')).toBe(false);
+    expect(safeEqual('a', 'aa')).toBe(false);
+    expect(safeEqual('', 'a')).toBe(false);
   });
 });

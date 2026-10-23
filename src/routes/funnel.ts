@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import type { Env } from '../env.js';
+import { safeEqual, singleHeader } from '../lib/tokens.js';
 
 // Öffentlich meldbare Schritte — 'booking' fehlt bewusst: Conversion zählt NUR der Server
 // im Buchungs-Handler, sonst wäre der Trichter von außen aufblasbar.
@@ -36,10 +37,15 @@ export function funnelRoutes(app: FastifyInstance, deps: { prisma: PrismaClient;
   });
 
   app.get('/stats/funnel', async (req, reply) => {
-    const { token } = FunnelQuery.parse(req.query);
+    const { token: queryToken } = FunnelQuery.parse(req.query);
+    // Bearer-Header bevorzugt; Query nur übergangsweise (Backlog: entfernen). Doppelter Header = ungültig.
+    const rawAuth = req.headers.authorization;
+    const token = rawAuth !== undefined
+      ? /^Bearer (.+)$/.exec(singleHeader(rawAuth) ?? '')?.[1]
+      : queryToken;
     // Ohne konfiguriertes Token existiert der Endpoint nach außen nicht (404, nie 401/403 —
     // kein Orakel, ob es hier etwas zu holen gibt).
-    if (!env?.FUNNEL_TOKEN || !token || token !== env.FUNNEL_TOKEN) {
+    if (!env?.FUNNEL_TOKEN || !token || !safeEqual(token, env.FUNNEL_TOKEN)) {
       return reply.code(404).send({ message: 'Nicht gefunden' });
     }
     const cutoff = new Date(Date.now() - DAYS * 86400_000).toISOString().slice(0, 10);

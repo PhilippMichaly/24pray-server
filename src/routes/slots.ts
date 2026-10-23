@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Mailer } from '../lib/mailer.js';
 import type { Env } from '../env.js';
 import { buildIcs, googleCalendarUrl, type CalendarEvent } from '../lib/calendar.js';
-import { generateToken } from '../lib/tokens.js';
+import { generateToken, safeEqual, singleHeader } from '../lib/tokens.js';
 import { requireUser } from '../plugins/auth.js';
 import { BookSlotBody } from '../schemas/slots.js';
 import { buildSlotGrid, slotLengthMs, type BookedSlotInput } from '../lib/slotGrid.js';
@@ -272,7 +272,10 @@ export function slotRoutes(
   // Cancel a slot — booker, organizer (beide eingeloggt) ODER Gast per guestToken (§6.3)
   app.delete('/slots/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const { guestToken } = CancelQuery.parse(req.query);
+    const { guestToken: queryToken } = CancelQuery.parse(req.query);
+    // Header bevorzugt; Query nur übergangsweise (Backlog: entfernen). Doppelter Header = ungültig.
+    const rawHeader = req.headers['x-guest-token'];
+    const guestToken = rawHeader !== undefined ? singleHeader(rawHeader) : queryToken;
     const slot = await prisma.prayerSlot.findUnique({ where: { id }, include: { project: true } });
     if (!slot) throw httpError(404, 'Slot nicht gefunden');
 
@@ -280,7 +283,7 @@ export function slotRoutes(
     const isBooker = !!user && slot.userId === user.id;
     const isOrganizer = !!user && slot.project.organizerId === user.id;
     // Gast-Pfad: slot.userId ist null → User-Prüfung greift nicht, Token-Vergleich ist zwingend.
-    const isGuest = !user && !!guestToken && slot.guestToken === guestToken;
+    const isGuest = !user && !!guestToken && !!slot.guestToken && safeEqual(guestToken, slot.guestToken);
     if (!isBooker && !isOrganizer && !isGuest) {
       throw httpError(403, 'Nur Bucher, Organisator oder Gast (mit Token) dürfen stornieren');
     }

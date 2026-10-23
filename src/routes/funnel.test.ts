@@ -79,6 +79,16 @@ describe('Backlog 8 — Funnel-Zähler', () => {
     expect(today.booking).toBeGreaterThanOrEqual(1);
   });
 
+  it('GET /stats/funnel per Authorization: Bearer — richtig 200, falsch/leer/doppelt 404', async () => {
+    const get = (authorization?: string | string[]) =>
+      app.inject({ method: 'GET', url: '/stats/funnel', headers: (authorization === undefined ? {} : { authorization }) as Record<string, string> });
+    expect((await get('Bearer un8-secret')).statusCode).toBe(200);
+    expect((await get('Bearer falsch')).statusCode).toBe(404);
+    expect((await get('Bearer ')).statusCode).toBe(404);
+    expect((await get('un8-secret')).statusCode).toBe(404); // ohne Bearer-Schema
+    expect((await get(['Bearer un8-secret', 'Bearer un8-secret'])).statusCode).toBe(404);
+  });
+
   it('GET /stats/funnel: 404 wenn FUNNEL_TOKEN leer (Endpoint faktisch aus)', async () => {
     const { buildApp: build } = await import('../app.js');
     const bare = await build({
@@ -90,6 +100,8 @@ describe('Backlog 8 — Funnel-Zähler', () => {
     try {
       expect((await bare.inject({ method: 'GET', url: '/stats/funnel?token=' })).statusCode).toBe(404);
       expect((await bare.inject({ method: 'GET', url: '/stats/funnel?token=un8-secret' })).statusCode).toBe(404);
+      expect((await bare.inject({ method: 'GET', url: '/stats/funnel', headers: { authorization: 'Bearer ' } })).statusCode).toBe(404);
+      expect((await bare.inject({ method: 'GET', url: '/stats/funnel', headers: { authorization: 'Bearer un8-secret' } })).statusCode).toBe(404);
     } finally { await bare.close(); }
   });
 });
