@@ -77,6 +77,10 @@ describe('Push-Subscription-Routen (Backlog 7)', () => {
       'https://fcm.googleapis.com.evil.com/x',
       'https://fcm.googleapis.com:8443/x',
       'https://user:pw@fcm.googleapis.com/x',
+      'https://169.254.169.254%2efcm.googleapis.com/latest',
+      'https://localhost%2efcm.googleapis.com/x',
+      'https:fcm.googleapis.com/x',
+      'https:/fcm.googleapis.com/x',
     ]) {
       expect((await post(bad, '10.2.9.2')).statusCode, bad).toBe(400);
       expect(await db.prisma.pushSubscription.count({ where: { endpoint: bad } })).toBe(0);
@@ -84,9 +88,11 @@ describe('Push-Subscription-Routen (Backlog 7)', () => {
   });
 
   it('isAllowedPushEndpoint: Randfälle', () => {
-    expect(isAllowedPushEndpoint('https://fcm.googleapis.com:443/x')).toBe(true);
+    expect(isAllowedPushEndpoint('https://fcm.googleapis.com:443/x')).toBe(false); // nicht kanonisch
     expect(isAllowedPushEndpoint('https://xfcm.googleapis.com/x')).toBe(false);
     expect(isAllowedPushEndpoint('nicht-eine-url')).toBe(false);
+    expect(isAllowedPushEndpoint('https://FCM.googleapis.com/x')).toBe(false); // nicht kanonisch
+    expect(isAllowedPushEndpoint('https://web.push.apple.com/x')).toBe(true);
   });
 
   it('Altbestand mit unbekanntem Host bleibt abmeldbar', async () => {

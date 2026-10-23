@@ -1,3 +1,4 @@
+import { parse as legacyParse } from 'node:url';
 import webpush from 'web-push';
 import type { PrismaClient } from '@prisma/client';
 import type { Env } from '../env.js';
@@ -8,6 +9,10 @@ const ALLOWED_PUSH_HOSTS = ['fcm.googleapis.com', 'push.services.mozilla.com', '
 export function isAllowedPushEndpoint(endpoint: string): boolean {
   try {
     const url = new URL(endpoint);
+    // web-push sendet mit dem alten url.parse: Rohstring muss kanonisch sein und beide Parser müssen
+    // denselben Host sehen, sonst lässt sich die Allowlist per Parser-Differential umgehen (%2e, "https:host").
+    if (url.href !== endpoint) return false;
+    if (legacyParse(endpoint).hostname !== url.hostname) return false;
     if (url.protocol !== 'https:') return false;
     if (url.port !== '' || url.username !== '' || url.password !== '') return false;
     return ALLOWED_PUSH_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith('.' + h));

@@ -49,4 +49,28 @@ describe('push lib (Backlog 7)', () => {
       expect(await db.prisma.pushSubscription.count({ where: { userId: u.id } })).toBe(2);
     } finally { await db.cleanup(); }
   });
+  it('pushToUsers sendet nicht an Parser-Differential-Endpoints, aber an echte kanonische', async () => {
+    const db: TestDb = await makeTestDb();
+    try {
+      const u = await db.prisma.user.create({ data: { email: 'a10-diff@example.com', name: 'a10' } });
+      const good = [
+        'https://fcm.googleapis.com/fcm/send/abc:def_ghi-1',
+        'https://updates.push.services.mozilla.com/wpush/v2/gAAAA',
+        'https://web.push.apple.com/QAbc',
+        'https://wns2-par02p.notify.windows.com/w/?token=x',
+      ];
+      const bad = [
+        'https://169.254.169.254%2efcm.googleapis.com/latest',
+        'https://localhost%2efcm.googleapis.com/x',
+        'https:fcm.googleapis.com/x',
+        'https:/fcm.googleapis.com/x',
+      ];
+      await db.prisma.pushSubscription.createMany({
+        data: [...good, ...bad].map((endpoint) => ({ endpoint, p256dh: 'k', auth: 'a', userId: u.id })),
+      });
+      const sender = vi.fn(async (_sub: { endpoint: string }) => {});
+      await pushToUsers(db.prisma, sender, [u.id], { title: 't', body: 'b', url: 'https://x/p' });
+      expect(sender.mock.calls.map((c) => c[0].endpoint).sort()).toEqual([...good].sort());
+    } finally { await db.cleanup(); }
+  });
 });
