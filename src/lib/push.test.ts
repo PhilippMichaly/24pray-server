@@ -14,8 +14,8 @@ describe('push lib (Backlog 7)', () => {
       const u = await db.prisma.user.create({ data: { email: 'un7-push@example.com', name: 'un7' } });
       await db.prisma.pushSubscription.createMany({
         data: [
-          { endpoint: 'https://push.example/ok', p256dh: 'k1', auth: 'a1', userId: u.id },
-          { endpoint: 'https://push.example/gone', p256dh: 'k2', auth: 'a2', userId: u.id },
+          { endpoint: 'https://fcm.googleapis.com/fcm/send/ok', p256dh: 'k1', auth: 'a1', userId: u.id },
+          { endpoint: 'https://fcm.googleapis.com/fcm/send/gone', p256dh: 'k2', auth: 'a2', userId: u.id },
         ],
       });
       const sent: string[] = [];
@@ -28,9 +28,25 @@ describe('push lib (Backlog 7)', () => {
         }
       });
       await pushToUsers(db.prisma, sender, [u.id], { title: 't', body: 'b', url: 'https://x/p' });
-      expect(sent.sort()).toEqual(['https://push.example/gone', 'https://push.example/ok']);
+      expect(sent.sort()).toEqual(['https://fcm.googleapis.com/fcm/send/gone', 'https://fcm.googleapis.com/fcm/send/ok']);
       const left = await db.prisma.pushSubscription.findMany({ where: { userId: u.id } });
-      expect(left.map((s) => s.endpoint)).toEqual(['https://push.example/ok']); // 410er gelöscht
+      expect(left.map((s) => s.endpoint)).toEqual(['https://fcm.googleapis.com/fcm/send/ok']); // 410er gelöscht
+    } finally { await db.cleanup(); }
+  });
+  it('pushToUsers überspringt Alt-Endpoints fremder Hosts, löscht sie aber nicht', async () => {
+    const db: TestDb = await makeTestDb();
+    try {
+      const u = await db.prisma.user.create({ data: { email: 'a10-push@example.com', name: 'a10' } });
+      await db.prisma.pushSubscription.createMany({
+        data: [
+          { endpoint: 'https://fcm.googleapis.com/fcm/send/ok', p256dh: 'k1', auth: 'a1', userId: u.id },
+          { endpoint: 'https://internal.example/legacy', p256dh: 'k2', auth: 'a2', userId: u.id },
+        ],
+      });
+      const sender = vi.fn(async (_sub: { endpoint: string }) => {});
+      await pushToUsers(db.prisma, sender, [u.id], { title: 't', body: 'b', url: 'https://x/p' });
+      expect(sender.mock.calls.map((c) => c[0].endpoint)).toEqual(['https://fcm.googleapis.com/fcm/send/ok']);
+      expect(await db.prisma.pushSubscription.count({ where: { userId: u.id } })).toBe(2);
     } finally { await db.cleanup(); }
   });
 });

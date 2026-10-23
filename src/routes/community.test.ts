@@ -571,7 +571,7 @@ describe('Backlog 1 — Update-Benachrichtigung', () => {
     const { id } = await setupProjectWithParticipants();
     const memberUser = await db.prisma.user.findUniqueOrThrow({ where: { email: 'un1-up-member@example.com' } });
     await db.prisma.pushSubscription.create({
-      data: { endpoint: 'https://push.example/un7-community', p256dh: 'k', auth: 'a', userId: memberUser.id },
+      data: { endpoint: 'https://fcm.googleapis.com/fcm/send/un7-community', p256dh: 'k', auth: 'a', userId: memberUser.id },
     });
 
     const pushed: { endpoint: string; payload: { title: string; url: string } }[] = [];
@@ -596,7 +596,7 @@ describe('Backlog 1 — Update-Benachrichtigung', () => {
       });
       expect(post.statusCode).toBe(200);
       await vi.waitFor(() => expect(pushed.length).toBe(1));
-      expect(pushed[0].endpoint).toBe('https://push.example/un7-community');
+      expect(pushed[0].endpoint).toBe('https://fcm.googleapis.com/fcm/send/un7-community');
       expect(pushed[0].payload.title).toContain('un1 UpdateTest');
       expect(pushed[0].payload.url).toContain(`/projects/${id}`);
     } finally {

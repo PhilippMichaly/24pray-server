@@ -85,7 +85,7 @@ describe('sendDueReminders — Push-Zweitkanal (Backlog 7)', () => {
         },
       });
       await db.prisma.pushSubscription.create({
-        data: { endpoint: 'https://push.example/un7-remind', p256dh: 'k', auth: 'a', userId: user.id },
+        data: { endpoint: 'https://fcm.googleapis.com/fcm/send/un7-remind', p256dh: 'k', auth: 'a', userId: user.id },
       });
 
       const reminders: { email: string }[] = [];
@@ -102,7 +102,7 @@ describe('sendDueReminders — Push-Zweitkanal (Backlog 7)', () => {
       expect(reminders.length).toBe(1); // Mail-Kanal bleibt unverändert (Zweitkanal!)
 
       await vi.waitFor(() => expect(pushed.length).toBe(1)); // fire-and-forget
-      expect(pushed[0].endpoint).toBe('https://push.example/un7-remind');
+      expect(pushed[0].endpoint).toBe('https://fcm.googleapis.com/fcm/send/un7-remind');
       expect(pushed[0].payload.title).toContain('un7 Push Reminder');
       expect(pushed[0].payload.url).toBe(`${appUrl}/projects/${project.id}`);
     } finally {

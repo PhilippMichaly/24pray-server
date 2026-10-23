@@ -2,6 +2,20 @@ import webpush from 'web-push';
 import type { PrismaClient } from '@prisma/client';
 import type { Env } from '../env.js';
 
+const ALLOWED_PUSH_HOSTS = ['fcm.googleapis.com', 'push.services.mozilla.com', 'notify.windows.com', 'push.apple.com'];
+
+/** Nur HTTPS-Endpoints bekannter Push-Dienste (Host exakt oder Subdomain), ohne Fremdport und Credentials. */
+export function isAllowedPushEndpoint(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol !== 'https:') return false;
+    if (url.port !== '' || url.username !== '' || url.password !== '') return false;
+    return ALLOWED_PUSH_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith('.' + h));
+  } catch {
+    return false;
+  }
+}
+
 export interface PushPayload { title: string; body: string; url: string }
 export interface PushSubscriptionRecord { endpoint: string; p256dh: string; auth: string }
 export type PushSender = (sub: PushSubscriptionRecord, payload: PushPayload) => Promise<void>;
@@ -29,7 +43,8 @@ export async function pushToUsers(
 ): Promise<void> {
   if (userIds.length === 0) return;
   const subs = await prisma.pushSubscription.findMany({ where: { userId: { in: userIds } } });
-  await Promise.all(subs.map(async (s) => {
+  // Altbestand mit unbekanntem Host: nicht senden (SSRF), aber auch nicht löschen — Abmelden bleibt möglich.
+  await Promise.all(subs.filter((s) => isAllowedPushEndpoint(s.endpoint)).map(async (s) => {
     try {
       await sender({ endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, payload);
     } catch (err) {

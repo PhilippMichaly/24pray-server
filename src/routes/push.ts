@@ -3,20 +3,9 @@ import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { requireUser } from '../plugins/auth.js';
 import type { Env } from '../env.js';
+import { isAllowedPushEndpoint } from '../lib/push.js';
 
-const ALLOWED_PUSH_HOSTS = ['fcm.googleapis.com', 'push.services.mozilla.com', 'notify.windows.com', 'push.apple.com'];
-
-/** Nur HTTPS-Endpoints bekannter Push-Dienste (Host exakt oder Subdomain), ohne Fremdport und Credentials. */
-export function isAllowedPushEndpoint(endpoint: string): boolean {
-  try {
-    const url = new URL(endpoint);
-    if (url.protocol !== 'https:') return false;
-    if (url.port !== '' || url.username !== '' || url.password !== '') return false;
-    return ALLOWED_PUSH_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith('.' + h));
-  } catch {
-    return false;
-  }
-}
+export { isAllowedPushEndpoint };
 
 const SubscribeBody = z.object({
   endpoint: z.string().url().max(1000).refine(isAllowedPushEndpoint, 'Unbekannter Push-Dienst'),
