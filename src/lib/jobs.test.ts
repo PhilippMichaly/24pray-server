@@ -67,6 +67,118 @@ describe('cleanupExpired — wb-Aufräum-Job (Punkt 11)', () => {
   });
 });
 
+const DAY = 86400_000;
+
+describe('cleanupExpired — wb-unbestätigte Konten (N4)', () => {
+  it('löscht nur unbestätigte, > 7 Tage alte User ohne jede Relation (samt abgelaufenen MagicTokens)', async () => {
+    const db = await makeTestDb();
+    try {
+      const old = new Date(Date.now() - 8 * DAY);
+      const mk = (email: string, data: { activatedAt?: Date; createdAt?: Date } = {}) =>
+        db.prisma.user.create({ data: { email, name: email.split('@')[0], createdAt: old, ...data } });
+
+      const orphan = await mk('wb-inactive-orphan@example.com');
+      await db.prisma.magicToken.create({
+        data: { token: 'wb-orphan-tok', userId: orphan.id, expiresAt: new Date(Date.now() - 7 * DAY) },
+      });
+
+      const activated = await mk('wb-inactive-activated@example.com', { activatedAt: old });
+      const young = await mk('wb-inactive-young@example.com', { createdAt: new Date(Date.now() - 3 * DAY) });
+      const organizer = await mk('wb-inactive-organizer@example.com');
+      const booker = await mk('wb-inactive-booker@example.com');
+      const member = await mk('wb-inactive-member@example.com');
+      const recurrer = await mk('wb-inactive-recurring@example.com');
+      const author = await mk('wb-inactive-author@example.com');
+      const prefs = await mk('wb-inactive-pref@example.com');
+      const pusher = await mk('wb-inactive-push@example.com');
+      const sessioned = await mk('wb-inactive-session@example.com');
+      const pendingLink = await mk('wb-inactive-pending@example.com');
+
+      await makeDueProject(db, organizer.id, 'wb-Inactive-Own', 'wb-inactive-own');
+      const project = await makeDueProject(db, activated.id, 'wb-Inactive-Host', 'wb-inactive-host');
+      await db.prisma.prayerSlot.create({
+        data: { projectId: project.id, userId: booker.id, startTime: project.startDate, endTime: project.endDate },
+      });
+      await db.prisma.membership.create({ data: { userId: member.id, projectId: project.id } });
+      await db.prisma.recurringCommitment.create({ data: { userId: recurrer.id, projectId: project.id } });
+      await db.prisma.prayerRequest.create({
+        data: { projectId: project.id, authorId: author.id, authorName: 'A', text: 'Bitte' },
+      });
+      await db.prisma.reminderPreference.create({ data: { userId: prefs.id } });
+      await db.prisma.pushSubscription.create({
+        data: { endpoint: 'https://push.example/wb-inactive', p256dh: 'k', auth: 'a', userId: pusher.id },
+      });
+      await db.prisma.session.create({
+        data: { token: 'wb-inactive-sess', userId: sessioned.id, expiresAt: new Date(Date.now() + DAY) },
+      });
+      // Gerade angeforderter Link (noch gültig): Klick darf nicht ins Leere laufen.
+      await db.prisma.magicToken.create({
+        data: { token: 'wb-pending-tok', userId: pendingLink.id, expiresAt: new Date(Date.now() + 15 * 60_000) },
+      });
+
+      const result = await cleanupExpired(db.prisma);
+      expect(result.inactiveUsers).toBe(1);
+
+      expect(await db.prisma.user.findUnique({ where: { id: orphan.id } })).toBeNull();
+      expect(await db.prisma.magicToken.count({ where: { userId: orphan.id } })).toBe(0);
+      for (const kept of [activated, young, organizer, booker, member, recurrer, author, prefs, pusher, sessioned, pendingLink]) {
+        expect(await db.prisma.user.findUnique({ where: { id: kept.id } }), kept.email).not.toBeNull();
+      }
+
+      // Idempotent: zweiter Lauf löscht nichts mehr.
+      expect((await cleanupExpired(db.prisma)).inactiveUsers).toBe(0);
+    } finally {
+      await db.cleanup();
+    }
+  });
+});
+
+describe('cleanupExpired — wb-Gast-Adressen-Retention (N10)', () => {
+  it('leert guestEmail (nicht guestName) nur bei Slots von Projekten, die seit > 90 Tagen beendet sind', async () => {
+    const db = await makeTestDb();
+    try {
+      const owner = await db.prisma.user.create({
+        data: { email: 'wb-retention-owner@example.com', name: 'owner', activatedAt: new Date() },
+      });
+      const mkProject = (token: string, endDate: Date) =>
+        db.prisma.prayerProject.create({
+          data: {
+            title: token, organizerId: owner.id, inviteToken: token,
+            startDate: new Date(endDate.getTime() - DAY), endDate,
+          },
+        });
+      const mkGuestSlot = (projectId: string, start: Date, email: string) =>
+        db.prisma.prayerSlot.create({
+          data: {
+            projectId, startTime: start, endTime: new Date(start.getTime() + 3600_000),
+            status: 'COMPLETED', guestName: 'Gast', guestEmail: email,
+          },
+        });
+
+      const ancient = await mkProject('wb-ret-ancient', new Date(Date.now() - 100 * DAY));
+      const recent = await mkProject('wb-ret-recent', new Date(Date.now() - 30 * DAY));
+      const running = await mkProject('wb-ret-running', new Date(Date.now() + 10 * DAY));
+
+      const s1 = await mkGuestSlot(ancient.id, ancient.startDate, 'old@example.com');
+      const s2 = await mkGuestSlot(recent.id, recent.startDate, 'recent@example.com');
+      const s3 = await mkGuestSlot(running.id, running.startDate, 'running@example.com');
+
+      const result = await cleanupExpired(db.prisma);
+      expect(result.guestEmails).toBe(1);
+
+      const r1 = await db.prisma.prayerSlot.findUniqueOrThrow({ where: { id: s1.id } });
+      expect(r1.guestEmail).toBeNull();
+      expect(r1.guestName).toBe('Gast');
+      expect((await db.prisma.prayerSlot.findUniqueOrThrow({ where: { id: s2.id } })).guestEmail).toBe('recent@example.com');
+      expect((await db.prisma.prayerSlot.findUniqueOrThrow({ where: { id: s3.id } })).guestEmail).toBe('running@example.com');
+
+      expect((await cleanupExpired(db.prisma)).guestEmails).toBe(0);
+    } finally {
+      await db.cleanup();
+    }
+  });
+});
+
 describe('sendDueReminders — Push-Zweitkanal (Backlog 7)', () => {
   const appUrl = 'https://un7.example.com';
 

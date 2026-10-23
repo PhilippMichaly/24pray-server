@@ -83,22 +83,75 @@ export async function sendDueReminders(
 }
 
 const MAGIC_TOKEN_GRACE_MS = 60 * 60_000; // 1h Kulanzfenster nach Ablauf (Punkt 11)
+const DAY_MS = 86400_000;
+/** N4: Nie eingelöste Konten (nur Magic-Link angefordert) werden nach so vielen Tagen gelöscht. */
+export const INACTIVE_USER_DAYS = 7;
+/** N10: Gast-E-Mails werden so viele Tage nach Ende der Kette geleert. */
+export const GUEST_EMAIL_RETENTION_DAYS = 90;
 
 /**
  * Aufräum-Job (Punkt 11): löscht abgelaufene Sessions sofort und abgelaufene
  * MagicTokens erst nach einer Kulanzstunde (spätes Klicken auf einen fast
  * abgelaufenen Link soll nicht durch den Job selbst kaputtgehen).
+ *
+ * Datenschutz (N4/N10), idempotent:
+ * - User ohne activatedAt (nie eingeloggt — entstehen schon durch bloßes Anfordern eines
+ *   Magic-Links für eine beliebige Adresse), älter als INACTIVE_USER_DAYS und in KEINER
+ *   Relation: weder Projekte, Slots, Memberships, Daueranmeldungen, Gebetsanliegen,
+ *   Erinnerungs-Einstellung, Push-Subscriptions, noch Sessions oder (noch gültige bzw. in der
+ *   Kulanz liegende) MagicTokens. Die abgelaufenen Tokens/Sessions sind zu diesem Zeitpunkt
+ *   bereits durch die beiden Schritte davor gelöscht — `none: {}` schließt damit genau die
+ *   User aus, deren Link noch einlösbar ist, und verhindert jeden FK-RESTRICT-Fehler.
+ *   Bestandskonten von vor Migration 20260727120000 haben per Backfill activatedAt = createdAt.
+ * - guestEmail (nur die Adresse, guestName bleibt für die Statistik) von Slots, deren Kette
+ *   seit mehr als GUEST_EMAIL_RETENTION_DAYS beendet ist.
  */
 export async function cleanupExpired(
   prisma: PrismaClient,
   now = new Date(),
-): Promise<{ sessions: number; magicTokens: number }> {
+): Promise<{ sessions: number; magicTokens: number; inactiveUsers: number; guestEmails: number }> {
   const sessions = await prisma.session.deleteMany({ where: { expiresAt: { lt: now } } });
   const magicTokens = await prisma.magicToken.deleteMany({
     where: { expiresAt: { lt: new Date(now.getTime() - MAGIC_TOKEN_GRACE_MS) } },
   });
-  return { sessions: sessions.count, magicTokens: magicTokens.count };
+  const inactiveUsers = await prisma.user.deleteMany({
+    where: {
+      activatedAt: null,
+      createdAt: { lt: new Date(now.getTime() - INACTIVE_USER_DAYS * DAY_MS) },
+      magicTokens: { none: {} },
+      sessions: { none: {} },
+      projects: { none: {} },
+      slots: { none: {} },
+      memberships: { none: {} },
+      recurring: { none: {} },
+      requests: { none: {} },
+      reminderPref: { is: null },
+      pushSubs: { none: {} },
+    },
+  });
+  const guestEmails = await prisma.prayerSlot.updateMany({
+    where: {
+      guestEmail: { not: null },
+      project: { endDate: { lt: new Date(now.getTime() - GUEST_EMAIL_RETENTION_DAYS * DAY_MS) } },
+    },
+    data: { guestEmail: null },
+  });
+  return {
+    sessions: sessions.count,
+    magicTokens: magicTokens.count,
+    inactiveUsers: inactiveUsers.count,
+    guestEmails: guestEmails.count,
+  };
 }
+
+/**
+ * Der Aufräum-Job läuft nicht jede Minute, sondern stündlich (erster Tick sofort): User-
+ * und Slot-Filter haben keinen passenden Index (activatedAt/createdAt, guestEmail,
+ * PrayerProject.endDate, PrayerSlot.userId), jeder Lauf scannt also. Abgelaufene Sessions
+ * und Tokens werden ohnehin beim Einlösen auf expiresAt geprüft — die Verzögerung ist
+ * funktional folgenlos.
+ */
+const CLEANUP_EVERY_TICKS = 60;
 
 /** Startet alle Jobs im Intervall (server.ts). Gibt eine stop()-Funktion zurück. */
 export function startJobs(
@@ -106,13 +159,19 @@ export function startJobs(
   intervalMs = 60_000,
 ): () => void {
   let running = false; // Overlap-Guard: ein langsamer Tick (SMTP!) darf sich nicht stapeln
+  let tickNo = 0;
   const tick = async () => {
     if (running) return;
     running = true;
     try {
       await completeElapsedSlots(deps.prisma);
       await sendDueReminders(deps.prisma, deps.mailer, new Date(), deps.appUrl, deps.pushSender);
-      await cleanupExpired(deps.prisma);
+      if (tickNo++ % CLEANUP_EVERY_TICKS === 0) {
+        const c = await cleanupExpired(deps.prisma);
+        if (c.inactiveUsers || c.guestEmails) {
+          console.info(`[jobs] cleanup: ${c.inactiveUsers} unbestätigte Konten gelöscht, ${c.guestEmails} Gast-Adressen geleert`);
+        }
+      }
     } catch (err) {
       console.error('[jobs] tick failed:', err);
     } finally {

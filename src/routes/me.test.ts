@@ -121,6 +121,26 @@ describe('DELETE /me — wb-Konto löschen', () => {
     expect(pastSlotRow!.guestName).toBe('(gelöscht)');
   });
 
+  it('entfernt Update-Opt-outs mit der E-Mail des Users (case-insensitiv), fremde bleiben', async () => {
+    const owner = await loginAs('WB-Me-Del-OptOut@Example.com');
+    const user = await db.prisma.user.findUniqueOrThrow({ where: { email: 'WB-Me-Del-OptOut@Example.com' } });
+    const host = await db.prisma.user.create({ data: { email: 'wb-me-optout-host@example.com', name: 'host' } });
+    const project = await db.prisma.prayerProject.create({
+      data: {
+        title: 'wb-OptOutKette', organizerId: host.id, inviteToken: 'wb-optout-invite',
+        startDate: new Date(BASE), endDate: new Date(BASE + 10 * HOUR),
+      },
+    });
+    await db.prisma.updateOptOut.create({ data: { projectId: project.id, email: user.email.toLowerCase() } });
+    await db.prisma.updateOptOut.create({ data: { projectId: project.id, email: 'wb-other-optout@example.com' } });
+
+    const del = await app.inject({ method: 'DELETE', url: '/me', cookies: { session: owner } });
+    expect(del.statusCode).toBe(204);
+
+    const left = await db.prisma.updateOptOut.findMany({ where: { projectId: project.id } });
+    expect(left.map((o) => o.email)).toEqual(['wb-other-optout@example.com']);
+  });
+
   it('erfordert Login', async () => {
     const res = await app.inject({ method: 'DELETE', url: '/me' });
     expect(res.statusCode).toBe(401);

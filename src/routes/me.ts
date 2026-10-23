@@ -57,6 +57,9 @@ export function meRoutes(app: FastifyInstance, deps: { prisma: PrismaClient }) {
       await tx.reminderPreference.deleteMany({ where: { userId: user.id } });
       await tx.magicToken.deleteMany({ where: { userId: user.id } });
       await tx.session.deleteMany({ where: { userId: user.id } });
+      // Update-Mail-Opt-outs hängen nur an der E-Mail (lowercased gespeichert, siehe
+      // community.ts unsubscribe) — User.email ist nicht normalisiert, daher toLowerCase.
+      await tx.updateOptOut.deleteMany({ where: { email: user.email.toLowerCase() } });
 
       // 5) User selbst.
       await tx.user.delete({ where: { id: user.id } });
