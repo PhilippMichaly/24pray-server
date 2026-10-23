@@ -132,36 +132,20 @@ ADMIN_NOTIFY_TO=
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:no-reply@24pray.org
+# Empfaenger der Alarm-Mails des VPS-Selbstchecks (Monitoring, deploy/24pray-selfcheck.sh).
+# Leer = Selbstcheck mailt nicht, schreibt nur ins Journal. Von der API nicht gelesen.
+SELFCHECK_TO=
 EOF
 chmod 600 /etc/24pray-api.env'
 ```
 
 ## 6. systemd-Dienste
 
+Die API-Unit liegt versioniert in `deploy/24pray-api.service` (einzige Quelle, inkl.
+Sandbox-Härtung) und kommt mit dem rsync aus Schritt 3 schon auf den Server:
+
 ```bash
-$SSH 'cat > /etc/systemd/system/24pray-api.service <<EOF
-[Unit]
-Description=24pray API
-After=network.target
-
-[Service]
-Type=simple
-User=pray
-WorkingDirectory=/opt/24pray/api
-EnvironmentFile=/etc/24pray-api.env
-ExecStartPre=/usr/bin/npx prisma migrate deploy
-ExecStart=/usr/bin/node dist/server.js
-Restart=always
-RestartSec=3
-NoNewPrivileges=true
-ProtectSystem=strict
-ReadWritePaths=/opt/24pray/data
-ProtectHome=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
+$SSH 'install -m 644 /opt/24pray/api/deploy/24pray-api.service /etc/systemd/system/24pray-api.service
 
 cat > /etc/systemd/system/24pray-web.service <<EOF
 [Unit]
@@ -192,14 +176,45 @@ systemctl is-active 24pray-api 24pray-web'   # 2x "active"
 `ExecStartPre` fährt bei jedem Start die Prisma-Migrationen — ein frisches
 `data/`-Verzeichnis wird also automatisch zur fertigen DB.
 
+Die API-Unit läuft mit `ProtectSystem=strict`: beschreibbar ist nur `/opt/24pray/data`
+(SQLite plus npm-Cache `data/.npm` für das `npx` im `ExecStartPre`). Die Prisma-Engines
+müssen deshalb schon beim Deploy in `node_modules` liegen (`npm ci` + `prisma generate`,
+Schritt 4); zur Laufzeit lädt Prisma nichts nach. Prüfen: `systemd-analyze security
+24pray-api` (Ziel: Exposure < 3.0). Bewusst **kein** `MemoryDenyWriteExecute`, das bricht
+den JIT von Node.
+
 ## 7. nginx (eine Origin für Web + API)
+
+Phase 1 (nur HTTP, noch kein Zertifikat). Den Endstand nach certbot beschreibt
+`deploy/nginx.conf`, siehe Schritt 9. `map` und `log_format` stehen außerhalb des
+`server`-Blocks, weil `sites-enabled/*` im http-Kontext eingebunden wird.
 
 ```bash
 $SSH 'cat > /etc/nginx/sites-available/24pray <<EOF
+# Zugriffslog ohne Tokens: kein Query-String, /join/<token> maskiert, kein Referer
+map \$uri \$log_uri {
+    ~^/join/      /join/***;
+    ~^/api/join/  /api/join/***;
+    default       \$uri;
+}
+log_format notokens '\''\$remote_addr - \$remote_user [\$time_local] '\''
+                    '\''"\$request_method \$log_uri \$server_protocol" \$status \$body_bytes_sent '\''
+                    '\''"\$http_user_agent" \$request_time'\'';
+
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name 24pray.org www.24pray.org _;
+
+    server_tokens off;
+    access_log /var/log/nginx/access.log notokens;
+
+    # Gelten nur, solange keine location ein eigenes add_header setzt (sonst dort wiederholen)
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "frame-ancestors '\''none'\''" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
     # API unter /api/ — trailing slash am proxy_pass STRIPPT den Prefix
     location /api/ {
@@ -223,6 +238,11 @@ rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/24pray /etc/nginx/sites-enabled/24pray
 nginx -t && systemctl reload nginx'
 ```
+
+`server_tokens off` steht pro `server`, weil Ubuntus `nginx.conf` im http-Kontext schon
+`server_tokens build;` setzt (ein zweites dort wäre ein Duplikat-Fehler). Das Error-Log
+(`/var/log/nginx/error.log`) schreibt bei Upstream-Fehlern weiterhin die volle Request-Zeile
+samt Query-String und Referer; das Format ist dort nicht konfigurierbar.
 
 **Smoke-Test (Phase 1, nur IP):**
 
@@ -325,6 +345,19 @@ anpassen, sonst liefert `www.24pray.org` die Seite als Duplikat aus:
 - im 80-Block den certbot-Redirect für www von `https://$host…` auf `https://24pray.org$request_uri` ändern
 
 Verifikation: `curl -sI https://www.24pray.org/de` → `301`, `location: https://24pray.org/de`.
+
+**Endstand:** `deploy/nginx.conf` ist genau diese Datei nach certbot + www-Umstellung
+(inkl. Security-Header und tokenfreiem Log in beiden `server`-Blöcken). Bei Änderungen
+die Repo-Datei pflegen und einspielen:
+
+```bash
+$SSH 'cp -a /etc/nginx/sites-available/24pray /etc/nginx/sites-available/24pray.bak-$(date +%F) &&
+  install -m 644 /opt/24pray/api/deploy/nginx.conf /etc/nginx/sites-available/24pray &&
+  nginx -t && systemctl reload nginx'
+curl -sI https://24pray.org/de   # 5 Security-Header, "Server: nginx" ohne Version
+```
+
+Achtung: das `.bak` nicht in `sites-enabled` legen (dort wird alles eingebunden).
 
 ## 10. Echte Mails (SMTP)
 
@@ -442,10 +475,12 @@ Stand 2026-07-08. Zwei Bausteine, beide ohne Dritt-Dienste:
    alle 15 min): prüft Dienste (24pray-api/-web/nginx), Disk ≥85 %,
    TLS-Restlaufzeit <14 Tage, „Backup von heute vorhanden", SQLite `quick_check`,
    API-Antwort. Alarm-Mail über den eigenen Strato-SMTP (Zugang wird zur Laufzeit
-   aus `/etc/24pray-api.env` gelesen) an `RECIPIENT` (im Skript) — nur bei
+   aus `/etc/24pray-api.env` gelesen) an `SELFCHECK_TO` (ebenfalls aus
+   `/etc/24pray-api.env`; leer = keine Mail) — nur bei
    Zustandswechsel (Problem neu/behoben), State in `/var/lib/24pray-selfcheck.state`.
    **Falle:** Strato-SMTP verlangt CRLF-Zeilenenden — daher das `sed 's/$/\r/'`
-   vor curl. Test: Skriptkopie mit erzwungenem `PROBLEMS`-Eintrag laufen lassen.
+   vor curl. Die SMTP-Zugangsdaten bekommt curl per Config auf stdin (`-K -`), nicht als
+   Argument, sie stehen also nicht in `ps`. Test: Skriptkopie mit erzwungenem `PROBLEMS`-Eintrag laufen lassen.
 
 2. **Externer Uptime-Check** (Totalausfall-Erkennung): geplant als
    GitHub-Actions-Cron in diesem Repo (`.github/workflows/uptime.yml`).

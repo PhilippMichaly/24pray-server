@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # 24pray-Selbstcheck: Dienste, Disk, Zertifikat, Backup, DB-Integrität.
 # Mailt NUR bei Zustandswechsel (Problem neu / Problem behoben) über den
-# lokalen Strato-SMTP (Zugang aus /etc/24pray-api.env, SMTP_URL).
+# lokalen Strato-SMTP (Zugang aus /etc/24pray-api.env, SMTP_URL) an SELFCHECK_TO
+# (ebenfalls aus /etc/24pray-api.env; leer = kein Mailversand, nur Ausgabe im Journal).
 set -u
-RECIPIENT="philipp@michaly.de"
+ENV_FILE=/etc/24pray-api.env
+# Liest einen Wert aus der env-Datei, ohne sie zu sourcen (die Datei ist kein
+# Shell-Skript, z. B. SMTP_FROM enthaelt Leerzeichen und spitze Klammern).
+env_get() { grep -oP "^$1=\K.*" "$ENV_FILE" | tail -1 | tr -d '"'; }
+RECIPIENT=$(env_get SELFCHECK_TO)
 STATE=/var/lib/24pray-selfcheck.state
 PROBLEMS=()
 
@@ -39,12 +44,28 @@ echo "$NOW_STATE" > "$STATE"
 
 send_mail() {
   local subject="$1" body="$2"
-  # SMTP_URL: smtps://user%40host:PASS@smtp.strato.de:465 → curl kann das direkt
-  local url user pass
-  url=$(grep -oP '^SMTP_URL=\K.*' /etc/24pray-api.env | tr -d '"')
-  user=$(python3 -c "from urllib.parse import urlsplit,unquote;u=urlsplit('$url');print(unquote(u.username))")
-  pass=$(python3 -c "from urllib.parse import urlsplit,unquote;u=urlsplit('$url');print(unquote(u.password))")
-  host=$(python3 -c "from urllib.parse import urlsplit;u=urlsplit('$url');print(f'{u.hostname}:{u.port}')")
+  if [ -z "$RECIPIENT" ]; then
+    echo "SELFCHECK_TO fehlt in $ENV_FILE, keine Mail versendet" >&2
+    return 0
+  fi
+  # SMTP_URL: smtps://user%40host:PASS@smtp.strato.de:465. Die URL geht per argv an
+  # Python (nie in den Quelltext interpoliert), die Zugangsdaten per Config auf stdin
+  # an curl (nie in die Kommandozeile, also nicht in ps sichtbar).
+  local url cred host mailfile
+  url=$(env_get SMTP_URL)
+  {
+    read -r cred
+    read -r host
+  } < <(python3 -c '
+import sys
+from urllib.parse import urlsplit, unquote
+u = urlsplit(sys.argv[1])
+c = unquote(u.username or "") + ":" + unquote(u.password or "")
+# curl-Config: in "..." sind Backslash und Anfuehrungszeichen zu escapen
+print(c.replace("\\", "\\\\").replace(chr(34), "\\" + chr(34)))
+print(f"{u.hostname}:{u.port}")
+' "$url")
+  mailfile=$(mktemp)
   {
     echo "From: 24pray Selfcheck <no-reply@24pray.org>"
     echo "To: $RECIPIENT"
@@ -52,8 +73,12 @@ send_mail() {
     echo "Content-Type: text/plain; charset=utf-8"
     echo
     echo -e "$body"
-  } | sed 's/$//' | curl -sS --url "smtps://$host" --mail-from no-reply@24pray.org \
-        --mail-rcpt "$RECIPIENT" --user "$user:$pass" -T - >/dev/null
+  } | sed 's/$/\r/' > "$mailfile"
+  curl -sS -K - --url "smtps://$host/24pray.org" --mail-from no-reply@24pray.org \
+    --mail-rcpt "$RECIPIENT" -T "$mailfile" >/dev/null <<EOF
+user = "$cred"
+EOF
+  rm -f "$mailfile"
 }
 
 if [ "$NOW_STATE" = "PROBLEM" ] && [ "$LAST_STATE" = "OK" ]; then

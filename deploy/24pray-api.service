@@ -1,16 +1,52 @@
+# /etc/systemd/system/24pray-api.service — einzige Quelle der Unit; deploy/README.md
+# (Schritt 6) kopiert genau diese Datei auf den Server.
 [Unit]
 Description=24pray API
 After=network.target
 
 [Service]
 Type=simple
-User=24pray
-WorkingDirectory=/opt/24pray-api
+User=pray
+WorkingDirectory=/opt/24pray/api
 EnvironmentFile=/etc/24pray-api.env
+# npx/npm braucht einen beschreibbaren Cache; das Home (/opt/24pray) ist unter
+# ProtectSystem=strict read-only. Die Prisma-Engines liegen bereits in node_modules
+# (prisma generate beim Deploy), migrate deploy laedt nichts nach; der Telemetrie-
+# Check von Prisma wuerde nach ~/.cache schreiben und ist deshalb aus.
+Environment=npm_config_cache=/opt/24pray/data/.npm
+Environment=CHECKPOINT_DISABLE=1
 ExecStartPre=/usr/bin/npx prisma migrate deploy
 ExecStart=/usr/bin/node dist/server.js
 Restart=always
 RestartSec=3
+UMask=0077
+
+# Härtung (Ziel: systemd-analyze security < 3.0). Kein MemoryDenyWriteExecute,
+# das bricht den JIT von Node.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/24pray/data
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Abgelehnte Syscalls liefern EPERM statt den Prozess per SIGSYS zu killen.
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target
