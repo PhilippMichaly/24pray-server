@@ -272,6 +272,20 @@ function gslotName(s: { userName: string | null }): string | null {
   return s.userName;
 }
 
+describe('guestName-Grenzen', () => {
+  it('leer nach trim oder > 80 Zeichen -> 400', async () => {
+    const alice = await loginAs('guestname-limit@example.com');
+    const projectId = await makeProject(alice);
+    const book = (guestName: string) => app.inject({
+      method: 'POST', url: `/projects/${projectId}/slots`,
+      payload: { startTime: at(1), guestName, guestEmail: 'g@example.com' },
+    });
+    expect((await book('   ')).statusCode).toBe(400);
+    expect((await book('x'.repeat(81))).statusCode).toBe(400);
+    expect((await book('x'.repeat(80))).statusCode).toBe(200);
+  });
+});
+
 describe('Backlog 1 — Locale-Erfassung bei Buchung', () => {
   it('Gastbuchung persistiert locale am Slot (default de)', async () => {
     const owner = await loginAs('un1-slotloc-owner@example.com');

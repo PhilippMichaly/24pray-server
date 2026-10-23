@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { generateToken } from '../lib/tokens.js';
 import { requireUser } from '../plugins/auth.js';
-import { CreateProjectBody, ShiftProjectBody, UpdateProjectBody } from '../schemas/projects.js';
+import { assertProjectSpan, CreateProjectBody, ShiftProjectBody, UpdateProjectBody } from '../schemas/projects.js';
 import { toProjectWithStats, toProjectListWithStats } from '../lib/projectView.js';
 import { canReadProject, ensureMembership } from '../lib/access.js';
 import { notifyAdmin } from '../lib/adminNotify.js';
@@ -65,9 +65,7 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
   app.post('/projects', async (req) => {
     const user = requireUser(req);
     const body = CreateProjectBody.parse(req.body);
-    if (new Date(body.endDate) <= new Date(body.startDate)) {
-      throw httpError(400, 'endDate muss nach startDate liegen');
-    }
+    assertProjectSpan(new Date(body.startDate), new Date(body.endDate));
     const project = await prisma.prayerProject.create({
       data: {
         title: body.title,
@@ -132,6 +130,12 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
     const existing = await prisma.prayerProject.findUnique({ where: { id } });
     if (!existing) throw httpError(404, 'Projekt nicht gefunden');
     if (existing.organizerId !== user.id) throw httpError(403, 'Nur der Organisator darf ändern');
+    if (body.startDate !== undefined || body.endDate !== undefined) {
+      assertProjectSpan(
+        body.startDate ? new Date(body.startDate) : existing.startDate,
+        body.endDate ? new Date(body.endDate) : existing.endDate,
+      );
+    }
     const updated = await prisma.prayerProject.update({
       where: { id },
       data: {

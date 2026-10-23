@@ -5,7 +5,7 @@ export const NotificationChannel = z.enum(['EMAIL', 'TELEGRAM']);
 
 export const BookSlotBody = z.object({
   startTime: z.string().datetime(),
-  guestName: z.string().optional(),
+  guestName: z.string().trim().min(1).max(80).optional(),
   guestEmail: z.string().email().optional(),
   notifyChannel: NotificationChannel.default('EMAIL'),
   locale: MailLocale.default('de'),

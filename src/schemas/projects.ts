@@ -5,15 +5,39 @@ import { MailLocale } from './auth.js';
 const GroupLink = (prefix: string, re: RegExp) =>
   z.string().regex(re, `Link muss mit ${prefix} beginnen`).nullable().optional();
 
+export const MAX_PROJECT_DAYS = 366;
+
+/** Zeitzone muss der Runtime (ICU) bekannt sein — sonst scheitern spätere Intl-Formatierungen. */
+export function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Wirft einen 400er (Error mit statusCode, vom Error-Handler in app.ts durchgereicht). */
+export function assertProjectSpan(start: Date, end: Date): void {
+  let message: string | null = null;
+  if (!(end.getTime() > start.getTime())) message = 'endDate muss nach startDate liegen';
+  else if (end.getTime() - start.getTime() > MAX_PROJECT_DAYS * 86_400_000) {
+    message = `Eine Gebetswache darf höchstens ${MAX_PROJECT_DAYS} Tage dauern`;
+  }
+  if (message) throw Object.assign(new Error(message), { statusCode: 400 });
+}
+
+const Timezone = z.string().min(1).refine(isValidTimezone, 'Ungültige Zeitzone');
+
 export const ProjectStatus = z.enum(['DRAFT', 'ACTIVE', 'PAUSED', 'ARCHIVED']);
 export const ProjectVisibility = z.enum(['PUBLIC', 'PRIVATE']);
 
 export const CreateProjectBody = z.object({
-  title: z.string().min(1),
-  description: z.string().optional(),
+  title: z.string().trim().min(1).max(120),
+  description: z.string().max(5000).optional(),
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
-  timezone: z.string().min(1).default('Europe/Berlin'),
+  timezone: Timezone.default('Europe/Berlin'),
   language: MailLocale.default('de'),
   // Wählbare Aufteilung der Wache: Stunden (60) oder ganze Tage (1440) — kein Zwischenwert (24pray Tages-Wachen).
   slotDurationMinutes: z.union([z.literal(60), z.literal(1440)]).default(60),
@@ -30,11 +54,11 @@ export const CreateProjectBody = z.object({
 });
 
 export const UpdateProjectBody = z.object({
-  title: z.string().min(1).optional(),
+  title: z.string().trim().min(1).max(120).optional(),
   locationName: z.string().min(1).max(120).nullable().optional(),
   locationLat: z.number().min(-90).max(90).nullable().optional(),
   locationLon: z.number().min(-180).max(180).nullable().optional(),
-  description: z.string().nullable().optional(),
+  description: z.string().max(5000).nullable().optional(),
   status: ProjectStatus.optional(),
   visibility: ProjectVisibility.optional(),
   maskNames: z.boolean().optional(),
@@ -44,7 +68,7 @@ export const UpdateProjectBody = z.object({
   linkSignal: GroupLink('https://signal.group/', /^https:\/\/signal\.group\/#?[\w#%+\-/]+$/),
   startDate: z.string().datetime().optional(),
   endDate: z.string().datetime().optional(),
-  timezone: z.string().min(1).optional(),
+  timezone: Timezone.optional(),
 });
 
 /** Wache verschieben (Ersteller-Lebenszyklus): neuer Projekt-Start, Delta wandert auf alles. */

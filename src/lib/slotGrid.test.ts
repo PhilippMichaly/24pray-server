@@ -1,9 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { buildSlotGrid, maskName } from './slotGrid.js';
+import { buildSlotGrid, maskName, MAX_GRID_SLOTS } from './slotGrid.js';
 
 const REQ = 'requester-1';
 
 describe('buildSlotGrid', () => {
+  it('grid of legacy overlong project is clamped, not rejected', () => {
+    const start = new Date('2026-01-01T00:00:00.000Z');
+    const end = new Date(start.getTime() + 1000 * 24 * 3600_000);
+    const grid = buildSlotGrid(start, end, [], null, 60);
+    expect(MAX_GRID_SLOTS).toBe(366 * 24);
+    expect(grid).toHaveLength(MAX_GRID_SLOTS);
+  });
+
   it('produces slots of slotDurationMinutes across the range', () => {
     const start = new Date('2026-06-15T00:00:00.000Z');
     const end = new Date('2026-06-15T03:00:00.000Z');

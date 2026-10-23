@@ -229,6 +229,80 @@ describe('projects', () => {
     expect(mine.json().inviteToken).not.toBe('');
   });
 
+  it('lehnt Projekte über 366 Tage ab (POST)', async () => {
+    const alice = await loginAs('span-post@example.com');
+    const base = { title: 'Zu lang', visibility: 'PRIVATE' };
+    const tooLong = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: alice },
+      payload: { ...base, startDate: future(1), endDate: new Date(Date.now() + 3600_000 + 367 * DAY).toISOString() },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().message).toBe('Eine Gebetswache darf höchstens 366 Tage dauern');
+    const farFuture = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: alice },
+      payload: { ...base, startDate: future(1), endDate: '9999-12-31T00:00:00.000Z' },
+    });
+    expect(farFuture.statusCode).toBe(400);
+    const backwards = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: alice },
+      payload: { ...base, startDate: future(5), endDate: future(2) },
+    });
+    expect(backwards.statusCode).toBe(400);
+    expect(backwards.json().message).toBe('endDate muss nach startDate liegen');
+    const exactly = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: alice },
+      payload: { ...base, startDate: '2030-01-01T00:00:00.000Z', endDate: '2031-01-02T00:00:00.000Z' },
+    });
+    expect(exactly.statusCode).toBe(200);
+  });
+
+  it('lehnt PATCH ab, das end <= start oder > 366 Tage ergibt', async () => {
+    const alice = await loginAs('span-patch@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: alice },
+      payload: { title: 'Span', startDate: '2030-06-01T00:00:00.000Z', endDate: '2030-06-08T00:00:00.000Z' },
+    });
+    const id = create.json().id;
+    const patch = (payload: object) => app.inject({ method: 'PATCH', url: `/projects/${id}`, cookies: { session: alice }, payload });
+    expect((await patch({ endDate: '2030-05-01T00:00:00.000Z' })).statusCode).toBe(400);
+    expect((await patch({ endDate: '2030-06-01T00:00:00.000Z' })).statusCode).toBe(400);
+    expect((await patch({ endDate: '9999-12-31T00:00:00.000Z' })).statusCode).toBe(400);
+    expect((await patch({ startDate: '2029-01-01T00:00:00.000Z' })).statusCode).toBe(400);
+    expect((await patch({ endDate: '2030-06-10T00:00:00.000Z' })).statusCode).toBe(200);
+    expect((await patch({ title: 'Nur Titel' })).statusCode).toBe(200);
+  });
+
+  it('lehnt ungültige Zeitzone ab (POST und PATCH)', async () => {
+    const alice = await loginAs('tz@example.com');
+    const bad = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: alice },
+      payload: { title: 'TZ', startDate: future(1), endDate: future(4), timezone: 'Mars/Olympus' },
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().message).toBe('Ungültige Zeitzone');
+    const ok = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: alice },
+      payload: { title: 'TZ', startDate: future(1), endDate: future(4), timezone: 'America/New_York' },
+    });
+    expect(ok.statusCode).toBe(200);
+    const patchBad = await app.inject({ method: 'PATCH', url: `/projects/${ok.json().id}`, cookies: { session: alice }, payload: { timezone: 'Mars/Olympus' } });
+    expect(patchBad.statusCode).toBe(400);
+  });
+
+  it('begrenzt title auf 120 und description auf 5000 Zeichen', async () => {
+    const alice = await loginAs('lengths@example.com');
+    const base = { startDate: future(1), endDate: future(4) };
+    const post = (extra: object) => app.inject({ method: 'POST', url: '/projects', cookies: { session: alice }, payload: { ...base, title: 'T', ...extra } });
+    expect((await post({ title: 'x'.repeat(121) })).statusCode).toBe(400);
+    expect((await post({ title: '   ' })).statusCode).toBe(400);
+    expect((await post({ description: 'y'.repeat(5001) })).statusCode).toBe(400);
+    const ok = await post({ title: 'x'.repeat(120), description: 'y'.repeat(5000) });
+    expect(ok.statusCode).toBe(200);
+    const patch = (payload: object) => app.inject({ method: 'PATCH', url: `/projects/${ok.json().id}`, cookies: { session: alice }, payload });
+    expect((await patch({ title: 'x'.repeat(121) })).statusCode).toBe(400);
+    expect((await patch({ description: 'y'.repeat(5001) })).statusCode).toBe(400);
+  });
+
   it('create requires auth', async () => {
     const res = await app.inject({ method: 'POST', url: '/projects', payload: { title: 'x', startDate: future(1), endDate: future(2) } });
     expect(res.statusCode).toBe(401);

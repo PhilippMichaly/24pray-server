@@ -17,6 +17,9 @@ export interface BookedSlotInput {
 
 const MINUTE_MS = 60 * 1000;
 
+/** Obergrenze für Grid-Einträge (366 Tage à 24 Stunden) — schützt vor Alt-Projekten mit absurder Dauer. */
+export const MAX_GRID_SLOTS = 366 * 24;
+
 /** „Ruth Klein" → „Ruth K." — serverseitige Maskierung für anonyme Betrachter (§E5). */
 export function maskName(n: string | null): string | null {
   if (!n) return n;
@@ -45,7 +48,8 @@ export function buildSlotGrid(
   for (const b of booked) byStart.set(b.startTime.getTime(), b);
 
   const grid: SlotView[] = [];
-  for (let t = start.getTime(); t + slotMs <= end.getTime(); t += slotMs) {
+  const limit = Math.min(end.getTime(), start.getTime() + MAX_GRID_SLOTS * slotMs);
+  for (let t = start.getTime(); t + slotMs <= limit; t += slotMs) {
     const hit = byStart.get(t);
     const rawName = hit ? hit.userName ?? hit.guestName ?? null : null;
     grid.push({
