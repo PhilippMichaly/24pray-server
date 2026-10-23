@@ -696,3 +696,65 @@ describe('wk-DELETE /projects/:id — Wache löschen (Ersteller-Lebenszyklus)', 
     expect(getAfter.statusCode).toBe(404);
   });
 });
+
+describe('Task 7 — Einladungslink erneuern, Mitglied entfernen', () => {
+  async function makePrivate(orgaEmail: string) {
+    const orga = await loginAs(orgaEmail);
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'T7', startDate: future(1), endDate: future(5), visibility: 'PRIVATE' },
+    });
+    return { orga, id: create.json().id as string, inviteToken: create.json().inviteToken as string };
+  }
+  async function addMember(email: string, projectId: string) {
+    const session = await loginAs(email);
+    const user = await db.prisma.user.findUniqueOrThrow({ where: { email } });
+    await db.prisma.membership.create({ data: { userId: user.id, projectId, role: 'MEMBER' } });
+    return { session, userId: user.id };
+  }
+
+  it('Rotate liefert neuen Token; alter Join-Link 404, neuer 200', async () => {
+    const { orga, id, inviteToken } = await makePrivate('t7-rot-orga@example.com');
+    const res = await app.inject({ method: 'POST', url: `/projects/${id}/invite/rotate`, cookies: { session: orga } });
+    expect(res.statusCode).toBe(200);
+    const fresh = res.json().inviteToken as string;
+    expect(fresh).toBeTruthy();
+    expect(fresh).not.toBe(inviteToken);
+    expect((await app.inject({ method: 'GET', url: `/join/${inviteToken}` })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/join/${fresh}` })).statusCode).toBe(200);
+  });
+
+  it('Rotate: Fremder 403, anonym 401, unbekanntes Projekt 404', async () => {
+    const { id } = await makePrivate('t7-rot2-orga@example.com');
+    const mallory = await loginAs('t7-rot2-mallory@example.com');
+    expect((await app.inject({ method: 'POST', url: `/projects/${id}/invite/rotate`, cookies: { session: mallory } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: `/projects/${id}/invite/rotate` })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: `/projects/nope/invite/rotate`, cookies: { session: mallory } })).statusCode).toBe(404);
+  });
+
+  it('Mitglied entfernen: 204, Ex-Mitglied verliert Lesezugriff (PRIVATE -> 403), Slots bleiben', async () => {
+    const { orga, id } = await makePrivate('t7-rm-orga@example.com');
+    const { session, userId } = await addMember('t7-rm-member@example.com', id);
+    expect((await app.inject({ method: 'GET', url: `/projects/${id}`, cookies: { session } })).statusCode).toBe(200);
+    const slot = await db.prisma.prayerSlot.create({
+      data: { projectId: id, userId, startTime: new Date(future(1)), endTime: new Date(future(2)), status: 'BOOKED' },
+    });
+
+    const del = await app.inject({ method: 'DELETE', url: `/projects/${id}/members/${userId}`, cookies: { session: orga } });
+    expect(del.statusCode).toBe(204);
+    expect((await app.inject({ method: 'GET', url: `/projects/${id}`, cookies: { session } })).statusCode).toBe(403);
+    const after = await db.prisma.prayerSlot.findUniqueOrThrow({ where: { id: slot.id } });
+    expect(after.userId).toBe(userId);
+    // erneut entfernen: kein Mitglied mehr
+    const again = await app.inject({ method: 'DELETE', url: `/projects/${id}/members/${userId}`, cookies: { session: orga } });
+    expect(again.statusCode).toBe(404);
+  });
+
+  it('Mitglied entfernen: Organizer selbst 400, Nicht-Organizer 403', async () => {
+    const { orga, id } = await makePrivate('t7-rm2-orga@example.com');
+    const { session, userId } = await addMember('t7-rm2-member@example.com', id);
+    const orgaUser = await db.prisma.user.findUniqueOrThrow({ where: { email: 't7-rm2-orga@example.com' } });
+    expect((await app.inject({ method: 'DELETE', url: `/projects/${id}/members/${orgaUser.id}`, cookies: { session: orga } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'DELETE', url: `/projects/${id}/members/${userId}`, cookies: { session } })).statusCode).toBe(403);
+  });
+});

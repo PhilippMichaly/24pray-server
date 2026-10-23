@@ -168,6 +168,31 @@ export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient
     return toProjectWithStats(prisma, project, undefined);
   });
 
+  // Einladungslink erneuern (organizer only): alter Token ist sofort tot, Mitglieder behalten Zugang.
+  app.post('/projects/:id/invite/rotate', async (req) => {
+    const user = requireUser(req);
+    const { id } = req.params as { id: string };
+    const project = await prisma.prayerProject.findUnique({ where: { id } });
+    if (!project) throw httpError(404, 'Projekt nicht gefunden');
+    if (project.organizerId !== user.id) throw httpError(403, 'Nur der Organisator darf den Einladungslink erneuern');
+    const inviteToken = generateToken();
+    await prisma.prayerProject.update({ where: { id }, data: { inviteToken } });
+    return { inviteToken };
+  });
+
+  // Mitglied entfernen (organizer only): nur die Membership; gebuchte Slots bleiben bestehen.
+  app.delete('/projects/:id/members/:userId', async (req, reply) => {
+    const user = requireUser(req);
+    const { id, userId } = req.params as { id: string; userId: string };
+    const project = await prisma.prayerProject.findUnique({ where: { id } });
+    if (!project) throw httpError(404, 'Projekt nicht gefunden');
+    if (project.organizerId !== user.id) throw httpError(403, 'Nur der Organisator darf Mitglieder entfernen');
+    if (userId === project.organizerId) throw httpError(400, 'Der Organisator kann nicht entfernt werden');
+    const removed = await prisma.membership.deleteMany({ where: { projectId: id, userId } });
+    if (removed.count === 0) throw httpError(404, 'Mitglied nicht gefunden');
+    return reply.code(204).send();
+  });
+
   // Wache verschieben (organizer only): Delta zwischen altem und neuem Start wandert
   // 1:1 auf Projekt-Zeitraum UND alle Slots (auch CANCELLED/COMPLETED — Historie bleibt
   // konsistent). Prisma legt DateTime auf SQLite als Unix-Epoch-Millisekunden (INTEGER-
