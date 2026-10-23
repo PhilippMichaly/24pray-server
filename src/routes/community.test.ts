@@ -37,13 +37,17 @@ beforeAll(async () => {
       async sendReminder(email, r) { reminders.push({ email, r }); },
       async sendUpdateNotice(email, n) { updates.push({ email, n }); },
     },
+    // Diese Datei bucht mehr als 10× pro Minute von 127.0.0.1 (inject-Default) — Limit-Test liegt in slots.test.ts.
+    disableWriteRateLimits: true,
   });
   await app.ready();
 });
 afterAll(async () => { await app.close(); await db.cleanup(); });
 
+// Buchungs-Guard: nur zukünftige Slots auf dem Raster — Basis = nächste volle Stunde + 1 Tag.
 const HOUR = 3600_000;
-const at = (h: number) => new Date(Date.UTC(2026, 5, 20, h, 0, 0)).toISOString();
+const BASE = Math.ceil(Date.now() / HOUR) * HOUR + 24 * HOUR;
+const at = (h: number) => new Date(BASE + h * HOUR).toISOString();
 
 async function makePrivateProject(cookie: string): Promise<{ id: string; inviteToken: string }> {
   const res = await app.inject({
@@ -70,12 +74,12 @@ describe('W3 — Invite-Gap (PRIVATE + ?invite)', () => {
 
   it('Mitglied (per Buchung) liest PRIVATE Projekt auch ohne Token', async () => {
     const owner = await loginAs('w3-owner2@example.com');
-    const { id } = await makePrivateProject(owner);
+    const { id, inviteToken } = await makePrivateProject(owner);
     const member = await loginAs('w3-member@example.com');
-    // Buchen (POST ist offen) → Membership
+    // Buchen mit Einladungstoken (A4: PRIVATE braucht Leserecht) → Membership
     const book = await app.inject({
       method: 'POST', url: `/projects/${id}/slots`, cookies: { session: member },
-      payload: { startTime: at(2) },
+      payload: { startTime: at(2), invite: inviteToken },
     });
     expect(book.statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: `/projects/${id}`, cookies: { session: member } })).statusCode).toBe(200);
@@ -159,9 +163,9 @@ describe('W3 — Jobs + Statistik', () => {
 
     reminders.length = 0;
     // 06:00 → 2h Vorlauf > 60min-Default: noch nichts
-    expect(await sendDueReminders(db.prisma, app0Mailer(), new Date(Date.UTC(2026, 5, 20, 6, 0, 0)))).toBe(0);
+    expect(await sendDueReminders(db.prisma, app0Mailer(), new Date(at(6)))).toBe(0);
     // 07:30 → innerhalb 60min: genau 1
-    const dueNow = new Date(Date.UTC(2026, 5, 20, 7, 30, 0));
+    const dueNow = new Date(BASE + 7.5 * HOUR);
     expect(await sendDueReminders(db.prisma, app0Mailer(), dueNow)).toBe(1);
     expect(reminders.at(-1)!.email).toBe('w3-remind@example.com');
     // idempotent
@@ -356,7 +360,7 @@ describe('W3 — Recurring', () => {
   it('„Jede Woche" materialisiert Folgewochen bis Projektende', async () => {
     const owner = await loginAs('w3-recur@example.com');
     // 15 Tage langes Projekt → Basis + 2 Folgewochen
-    const start = Date.UTC(2026, 5, 20, 0, 0, 0);
+    const start = BASE;
     const res = await app.inject({
       method: 'POST', url: '/projects', cookies: { session: owner },
       payload: {
@@ -378,7 +382,7 @@ describe('W3 — Recurring', () => {
   it('„Jede Woche" funktioniert auch für Tages-Wachen (slotDurationMinutes=1440)', async () => {
     const owner = await loginAs('w3-recur-day@example.com');
     // 5 Wochen lange Tages-Wache → Basis-Tag + 4 Folgewochen (jeweils +7 Tage, Slot-Länge=1 Tag)
-    const start = Date.UTC(2026, 5, 20, 14, 0, 0);
+    const start = BASE + 14 * HOUR;
     const res = await app.inject({
       method: 'POST', url: '/projects', cookies: { session: owner },
       payload: {

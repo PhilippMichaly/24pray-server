@@ -23,10 +23,13 @@ export interface BuildAppDeps {
   mailer?: Mailer;
   // Backlog 7: injizierbar für Tests (Fakes) / explizit null zum Ausschalten trotz VAPID-Env.
   pushSender?: PushSender | null;
+  // Nur für Tests (Ruling R1): schaltet die Pro-IP-Limits auf schreibenden Routen (Buchen,
+  // Projekt anlegen) ab, weil inject alle Requests von 127.0.0.1 schickt. Bewusst kein Env-Schalter.
+  disableWriteRateLimits?: boolean;
 }
 
 export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
-  const { prisma, env } = deps;
+  const { prisma, env, disableWriteRateLimits } = deps;
   const mailer = deps.mailer ?? createMailer({ smtpUrl: env.SMTP_URL, from: env.SMTP_FROM });
   const pushSender = deps.pushSender !== undefined ? deps.pushSender : createPushSender(env);
 
@@ -68,7 +71,7 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   app.get('/health', async () => ({ ok: true }));
   authRoutes(app, { prisma, mailer, env });
   projectRoutes(app, { prisma, mailer, env });
-  slotRoutes(app, { prisma, mailer, env });
+  slotRoutes(app, { prisma, mailer, env, disableWriteRateLimits });
   communityRoutes(app, { prisma, mailer, env, pushSender });
   meRoutes(app, { prisma });
   funnelRoutes(app, { prisma, env });

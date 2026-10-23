@@ -31,12 +31,17 @@ beforeAll(async () => {
       async sendScheduleChange(email, m) { scheduleChanges.push({ email, m }); },
       async sendProjectFarewell(email, m) { farewells.push({ email, m }); },
     },
+    // Diese Datei bucht mehr als 10× pro Minute von 127.0.0.1 (inject-Default) — Limit-Test liegt in slots.test.ts.
+    disableWriteRateLimits: true,
   });
   await app.ready();
 });
 afterAll(async () => { await app.close(); await db.cleanup(); });
 
-const future = (h: number) => new Date(Date.now() + h * 3600_000).toISOString();
+// Eine feste Basis statt Date.now() je Aufruf: Buchungen müssen exakt auf dem Stundenraster
+// des Projektstarts liegen (Buchungs-Guard), Millisekunden-Jitter zwischen den Calls wäre „neben dem Raster".
+const NOW = Date.now();
+const future = (h: number) => new Date(NOW + h * 3600_000).toISOString();
 const DAY = 24 * 3600_000;
 
 describe('projects', () => {

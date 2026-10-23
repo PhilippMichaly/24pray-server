@@ -50,7 +50,10 @@ beforeAll(async () => {
 });
 afterAll(async () => { await app.close(); await quietApp.close(); await db.cleanup(); });
 
-const at = (h: number) => new Date(Date.UTC(2026, 8, 10, h, 0, 0)).toISOString();
+// Buchungs-Guard: nur zukünftige Slots auf dem Raster — Basis = nächste volle Stunde + 1 Tag.
+const HOUR = 3600_000;
+const BASE = Math.ceil(Date.now() / HOUR) * HOUR + 24 * HOUR;
+const at = (h: number) => new Date(BASE + h * HOUR).toISOString();
 
 async function createProject(session: string, overrides: Record<string, unknown> = {}) {
   const res = await app.inject({

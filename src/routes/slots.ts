@@ -21,8 +21,13 @@ function httpError(status: number, message: string) {
 const CancelQuery = z.object({ guestToken: z.string().optional() });
 const InviteQuery = z.object({ invite: z.string().optional() });
 
-export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env }) {
+export function slotRoutes(
+  app: FastifyInstance,
+  deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env; disableWriteRateLimits?: boolean },
+) {
   const { prisma, mailer, env } = deps;
+  // A2: Buchen ist eine offene Schreibroute (Gäste) → 10/min je IP. `false` = kein Limit (nur Tests).
+  const bookingRateLimit = deps.disableWriteRateLimits ? false : { max: 10, timeWindow: '1 minute' };
 
   const slotEvent = (
     slot: { id: string; startTime: Date; endTime: Date; projectId: string },
@@ -69,18 +74,33 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     );
   });
 
-  // Book a slot
-  app.post('/projects/:id/slots', async (req) => {
+  // Book a slot — nur mit Leserecht, in einer ACTIVE-Wache, auf dem Raster und nicht rückwirkend.
+  app.post('/projects/:id/slots', { config: { rateLimit: bookingRateLimit } }, async (req) => {
     const { id } = req.params as { id: string };
     const body = BookSlotBody.parse(req.body);
     const project = await prisma.prayerProject.findUnique({ where: { id }, include: { organizer: true } });
     if (!project) throw httpError(404, 'Projekt nicht gefunden');
 
+    // A4: Leserecht zuerst (PRIVATE ohne Invite → 404 wie beim Lesen, kein Existenz-Orakel).
+    // Alles Weitere (409/400) verrät Details und kommt deshalb erst danach.
+    const invite = body.invite ?? InviteQuery.parse(req.query).invite;
+    if (!(await canReadProject(prisma, project, req.user, invite))) {
+      throw httpError(404, 'Projekt nicht gefunden');
+    }
+    if (project.status !== 'ACTIVE') throw httpError(409, 'Diese Gebetswache nimmt gerade keine Buchungen an');
+
+    const slotMs = slotLengthMs(project.slotDurationMinutes);
     const startTime = new Date(body.startTime);
-    const endTime = new Date(startTime.getTime() + slotLengthMs(project.slotDurationMinutes));
+    const endTime = new Date(startTime.getTime() + slotMs);
     if (startTime < project.startDate || endTime > project.endDate) {
       throw httpError(400, 'Zeitfenster liegt außerhalb des Projektzeitraums');
     }
+    // N1: nur Startzeiten auf dem Raster des Projekts (sonst entstehen überlappende Phantom-Slots).
+    if ((startTime.getTime() - project.startDate.getTime()) % slotMs !== 0) {
+      throw httpError(400, 'Ungültiges Zeitfenster');
+    }
+    // N5: nicht rückwirkend — der laufende Slot (endTime > now) bleibt buchbar.
+    if (endTime.getTime() <= Date.now()) throw httpError(400, 'Dieses Zeitfenster liegt in der Vergangenheit');
 
     // Logged-in user OR guest (needs a name)
     const userId = req.user?.id ?? null;
@@ -136,8 +156,7 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         isAllDay: project.slotDurationMinutes === 1440,
         // Bewusster Trade-off (Review Backlog-4 F2): Der Gast-Bucher bekommt bei PRIVATE den echten
         // inviteToken per Mail — er ist Teilnehmer, Mail-Weiterleitung = Einladung (gleiches Muster
-        // wie die Update-Mails in community.ts). Achtung: POST /slots prüft kein canReadProject
-        // (vorbestehend) — Hardening dazu siehe Backlog-Merkposten.
+        // wie die Update-Mails in community.ts).
         projectUrl: `${env.APP_URL}/projects/${project.id}${project.visibility === 'PRIVATE' ? `?invite=${project.inviteToken}` : ''}`,
       }).catch((err) => console.error(`[mail] booking confirmation failed for slot ${slot.id}:`, err));
     }
@@ -198,8 +217,13 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     const base = await prisma.prayerSlot.findUnique({ where: { id }, include: { project: true } });
     if (!base) throw httpError(404, 'Slot nicht gefunden');
     if (base.userId !== user.id) throw httpError(403, 'Nur der eigene Slot kann wiederholt werden');
+    // Nur eine bestehende Buchung in einer aktiven Wache lässt sich fortschreiben.
+    if (base.status !== 'BOOKED') throw httpError(409, 'Nur eine bestehende Buchung kann wiederholt werden');
+    if (base.project.status !== 'ACTIVE') throw httpError(409, 'Diese Gebetswache nimmt gerade keine Buchungen an');
 
     const WEEK = 7 * 24 * 3600_000;
+    // Deckel für Altprojekte jenseits der 366-Tage-Grenze: ein Jahr hat höchstens 53 Folgewochen.
+    const MAX_RECUR_WEEKS = 53;
     const slotMs = slotLengthMs(base.project.slotDurationMinutes);
     const created: string[] = [];
 
@@ -207,7 +231,11 @@ export function slotRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
       data: { projectId: base.projectId, userId: user.id, slots: { connect: { id: base.id } } },
     });
 
-    for (let t = base.startTime.getTime() + WEEK; t + slotMs <= base.project.endDate.getTime(); t += WEEK) {
+    for (
+      let t = base.startTime.getTime() + WEEK, i = 0;
+      t + slotMs <= base.project.endDate.getTime() && i < MAX_RECUR_WEEKS;
+      t += WEEK, i++
+    ) {
       const startTime = new Date(t);
       try {
         const s = await prisma.$transaction(async (tx) => {

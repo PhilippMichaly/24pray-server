@@ -30,7 +30,10 @@ beforeAll(async () => {
 });
 afterAll(async () => { await app.close(); await db.cleanup(); });
 
-const at = (h: number) => new Date(Date.UTC(2026, 5, 20, h, 0, 0)).toISOString();
+// Buchungs-Guard: nur zukünftige Slots auf dem Raster — Basis = nächste volle Stunde + 1 Tag.
+const HOUR = 3600_000;
+const BASE = Math.ceil(Date.now() / HOUR) * HOUR + 24 * HOUR;
+const at = (h: number) => new Date(BASE + h * HOUR).toISOString();
 
 describe('Backlog 8 — Funnel-Zähler', () => {
   it('POST /funnel/hit zählt pro Tag+Step hoch, 204, speichert NUR date/step/count', async () => {

@@ -31,12 +31,23 @@ beforeAll(async () => {
       async sendBookingConfirmation(email, m) { bookingMails.push({ email, m }); },
       async sendBookingNotice(email, m) { bookingNotices.push({ email, m }); },
     },
+    // Diese Datei bucht weit mehr als 10× pro Minute von 127.0.0.1 (inject-Default).
+    // Das Limit selbst prüft „Buchungs-Guard" auf einer eigenen App-Instanz ohne das Flag.
+    disableWriteRateLimits: true,
   });
   await app.ready();
 });
 afterAll(async () => { await app.close(); await db.cleanup(); });
 
-const at = (h: number) => new Date(Date.UTC(2026, 5, 20, h, 0, 0)).toISOString();
+const HOUR = 3600_000;
+// Buchungs-Guard: nur zukünftige Slots auf dem Stundenraster des Projekts.
+// Basis = nächste volle Stunde + 1 Tag, damit alle Buchungen hier in der Zukunft liegen.
+const BASE = Math.ceil(Date.now() / HOUR) * HOUR + 24 * HOUR;
+const at = (h: number) => new Date(BASE + h * HOUR).toISOString();
+/** ISO → ICS-Zeitstempel (20260620T020000Z). */
+const icsStamp = (iso: string) => iso.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+/** ISO → Kalendertag (20260620). */
+const icsDay = (iso: string) => iso.slice(0, 10).replace(/-/g, '');
 
 async function makeProject(cookie: string) {
   const res = await app.inject({
@@ -144,19 +155,21 @@ describe('slots', () => {
     expect(ics.statusCode).toBe(200);
     expect(ics.headers['content-type']).toContain('text/calendar');
     expect(ics.body).toContain('BEGIN:VEVENT');
-    expect(ics.body).toContain('DTSTART:20260620T020000Z');
+    expect(ics.body).toContain(`DTSTART:${icsStamp(at(2))}`);
     expect(ics.body).toContain('Slots'); // Projekttitel im SUMMARY
     expect(await app.inject({ method: 'GET', url: '/slots/gibtsnicht/ics' }).then((r) => r.statusCode)).toBe(404);
   });
 
   it('Tages-Wache (slotDurationMinutes=1440): ICS ist ein Ganztagestermin', async () => {
     const u = await loginAs('ics-day@example.com');
-    const dayStart = new Date(Date.UTC(2026, 6, 14, 12, 0, 0)).toISOString(); // 14:00 Berlin
+    // 12:00 UTC = 13:00/14:00 Berlin — derselbe Kalendertag in beiden Zonen.
+    const dayStartMs = Math.floor(BASE / (24 * HOUR)) * 24 * HOUR + 24 * HOUR + 12 * HOUR;
+    const dayStart = new Date(dayStartMs).toISOString();
     const create = await app.inject({
       method: 'POST', url: '/projects', cookies: { session: u },
       payload: {
         title: 'Tages-ICS', startDate: dayStart,
-        endDate: new Date(Date.UTC(2026, 6, 14 + 7, 12, 0, 0)).toISOString(),
+        endDate: new Date(dayStartMs + 7 * 24 * HOUR).toISOString(),
         visibility: 'PUBLIC', timezone: 'Europe/Berlin', slotDurationMinutes: 1440,
       },
     });
@@ -170,8 +183,8 @@ describe('slots', () => {
 
     const ics = await app.inject({ method: 'GET', url: `/slots/${slotId}/ics` });
     expect(ics.statusCode).toBe(200);
-    expect(ics.body).toContain('DTSTART;VALUE=DATE:20260714');
-    expect(ics.body).toContain('DTEND;VALUE=DATE:20260715');
+    expect(ics.body).toContain(`DTSTART;VALUE=DATE:${icsDay(dayStart)}`);
+    expect(ics.body).toContain(`DTEND;VALUE=DATE:${icsDay(new Date(dayStartMs + 24 * HOUR).toISOString())}`);
   });
 
   it('Gast-Buchung mit E-Mail verschickt Bestätigung mit Kalender-Links', async () => {
@@ -281,7 +294,9 @@ describe('guestName-Grenzen', () => {
       payload: { startTime: at(1), guestName, guestEmail: 'g@example.com' },
     });
     expect((await book('   ')).statusCode).toBe(400);
-    expect((await book('x'.repeat(81))).statusCode).toBe(400);
+    const tooLong = await book('x'.repeat(81));
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().message).toBe('Name darf höchstens 80 Zeichen haben');
     expect((await book('x'.repeat(80))).statusCode).toBe(200);
   });
 });
@@ -346,5 +361,190 @@ describe('Backlog 4 — Bestätigungsmail trägt projectUrl', () => {
       expect(hit).toBeTruthy();
       expect(hit!.m.projectUrl).toContain(`/projects/${id}`);
     });
+  });
+});
+
+describe('Buchungs-Guard (A4, N1, N5, A2)', () => {
+  const book = (projectId: string, payload: object, opts: { cookie?: string; query?: string } = {}) =>
+    app.inject({
+      method: 'POST', url: `/projects/${projectId}/slots${opts.query ?? ''}`,
+      ...(opts.cookie ? { cookies: { session: opts.cookie } } : {}),
+      payload,
+    });
+
+  async function makePrivateProject(cookie: string) {
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: cookie },
+      payload: { title: 'Guard privat', startDate: at(0), endDate: at(12), visibility: 'PRIVATE' },
+    });
+    return { id: res.json().id as string, inviteToken: res.json().inviteToken as string };
+  }
+
+  it('lehnt Buchung in PRIVATE ohne Invite ab (404, kein Existenz-Orakel)', async () => {
+    const owner = await loginAs('guard-priv-owner@example.com');
+    const { id } = await makePrivateProject(owner);
+    const anon = await book(id, { startTime: at(1), guestName: 'Gast' });
+    expect(anon.statusCode).toBe(404);
+    expect(anon.json().message).toBe('Projekt nicht gefunden');
+    const stranger = await loginAs('guard-priv-stranger@example.com');
+    expect((await book(id, { startTime: at(1) }, { cookie: stranger })).statusCode).toBe(404);
+    const wrong = await book(id, { startTime: at(1), guestName: 'Gast', invite: 'falsch' });
+    expect(wrong.statusCode).toBe(404);
+  });
+
+  it('books private project with invite in body', async () => {
+    const owner = await loginAs('guard-priv-body@example.com');
+    const { id, inviteToken } = await makePrivateProject(owner);
+    const res = await book(id, { startTime: at(1), guestName: 'Gast', invite: inviteToken });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('books private project with invite in query', async () => {
+    const owner = await loginAs('guard-priv-query@example.com');
+    const { id, inviteToken } = await makePrivateProject(owner);
+    const res = await book(id, { startTime: at(2), guestName: 'Gast' }, { query: `?invite=${inviteToken}` });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('lehnt Buchung in PAUSED/ARCHIVED/DRAFT ab (409)', async () => {
+    const owner = await loginAs('guard-status@example.com');
+    const projectId = await makeProject(owner);
+    for (const status of ['PAUSED', 'ARCHIVED', 'DRAFT']) {
+      const patch = await app.inject({
+        method: 'PATCH', url: `/projects/${projectId}`, cookies: { session: owner }, payload: { status },
+      });
+      expect(patch.statusCode).toBe(200);
+      const res = await book(projectId, { startTime: at(1) }, { cookie: owner });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().message).toBe('Diese Gebetswache nimmt gerade keine Buchungen an');
+    }
+  });
+
+  it('409 bei inaktivem PRIVATE-Projekt nur mit Leserecht — Fremde bekommen 404', async () => {
+    const owner = await loginAs('guard-status-priv@example.com');
+    const { id } = await makePrivateProject(owner);
+    await app.inject({ method: 'PATCH', url: `/projects/${id}`, cookies: { session: owner }, payload: { status: 'PAUSED' } });
+    expect((await book(id, { startTime: at(1), guestName: 'Gast' })).statusCode).toBe(404);
+    expect((await book(id, { startTime: at(1) }, { cookie: owner })).statusCode).toBe(409);
+  });
+
+  it('lehnt Startzeit neben dem Raster ab (400)', async () => {
+    const owner = await loginAs('guard-grid@example.com');
+    const projectId = await makeProject(owner);
+    const offGrid = new Date(BASE + 1).toISOString();
+    const res = await book(projectId, { startTime: offGrid }, { cookie: owner });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toBe('Ungültiges Zeitfenster');
+  });
+
+  it('lehnt vergangene Slots ab (400), erlaubt den gerade laufenden Slot', async () => {
+    const owner = await loginAs('guard-past@example.com');
+    // Raster-Anker: Slot, der vor 10 min begann — Projektstart 48 h davor liegt auf demselben Raster.
+    const running = Date.now() - 10 * 60_000;
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: {
+        title: 'Guard Vergangenheit', visibility: 'PUBLIC',
+        startDate: new Date(running - 48 * HOUR).toISOString(),
+        endDate: new Date(running + 48 * HOUR).toISOString(),
+      },
+    });
+    const projectId = res.json().id as string;
+
+    // Vor 2 h geendet (Start vor 3 h 10 min).
+    const past = await book(projectId, { startTime: new Date(running - 3 * HOUR).toISOString() }, { cookie: owner });
+    expect(past.statusCode).toBe(400);
+    expect(past.json().message).toBe('Dieses Zeitfenster liegt in der Vergangenheit');
+
+    const now = await book(projectId, { startTime: new Date(running).toISOString() }, { cookie: owner });
+    expect(now.statusCode).toBe(200);
+  });
+
+  it('limitiert Buchungen auf 10 pro Minute und IP (11. Request 429)', async () => {
+    // Eigene App-Instanz OHNE disableWriteRateLimits — der Zähler ist pro Instanz.
+    const limited = await buildApp({
+      prisma: db.prisma,
+      env: parseEnv({ APP_URL: 'http://localhost:3000' }),
+      mailer: { async sendMagicLink() {} },
+    });
+    await limited.ready();
+    try {
+      const owner = await loginAs('guard-rate@example.com');
+      const res = await app.inject({
+        method: 'POST', url: '/projects', cookies: { session: owner },
+        payload: { title: 'Guard Rate', startDate: at(0), endDate: at(24), visibility: 'PUBLIC' },
+      });
+      const projectId = res.json().id as string;
+      const codes: number[] = [];
+      for (let i = 0; i < 11; i++) {
+        const r = await limited.inject({
+          method: 'POST', url: `/projects/${projectId}/slots`, remoteAddress: '10.6.0.1',
+          payload: { startTime: at(i), guestName: `Gast ${i}` },
+        });
+        codes.push(r.statusCode);
+      }
+      expect(codes.slice(0, 10)).toEqual(Array(10).fill(200));
+      expect(codes[10]).toBe(429);
+      // Andere IP: eigener Zähler.
+      const other = await limited.inject({
+        method: 'POST', url: `/projects/${projectId}/slots`, remoteAddress: '10.6.0.2',
+        payload: { startTime: at(11), guestName: 'Gast andere IP' },
+      });
+      expect(other.statusCode).toBe(200);
+    } finally {
+      await limited.close();
+    }
+  });
+});
+
+describe('recur-Härtung', () => {
+  it('recur nur für BOOKED-Basis in ACTIVE-Projekt (sonst 409)', async () => {
+    const owner = await loginAs('recur-guard@example.com');
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'Recur Guard', startDate: at(0), endDate: at(15 * 24), visibility: 'PUBLIC' },
+    });
+    const projectId = res.json().id as string;
+
+    // Stornierte Basis → 409.
+    const cancelled = await app.inject({
+      method: 'POST', url: `/projects/${projectId}/slots`, cookies: { session: owner }, payload: { startTime: at(1) },
+    });
+    await app.inject({ method: 'DELETE', url: `/slots/${cancelled.json().id}`, cookies: { session: owner } });
+    const r1 = await app.inject({ method: 'POST', url: `/slots/${cancelled.json().id}/recur`, cookies: { session: owner } });
+    expect(r1.statusCode).toBe(409);
+
+    // Gebuchte Basis, aber Projekt pausiert → 409.
+    const booked = await app.inject({
+      method: 'POST', url: `/projects/${projectId}/slots`, cookies: { session: owner }, payload: { startTime: at(2) },
+    });
+    await app.inject({ method: 'PATCH', url: `/projects/${projectId}`, cookies: { session: owner }, payload: { status: 'PAUSED' } });
+    const r2 = await app.inject({ method: 'POST', url: `/slots/${booked.json().id}/recur`, cookies: { session: owner } });
+    expect(r2.statusCode).toBe(409);
+    expect(await db.prisma.prayerSlot.count({ where: { projectId } })).toBe(2);
+
+    // Wieder aktiv → 200.
+    await app.inject({ method: 'PATCH', url: `/projects/${projectId}`, cookies: { session: owner }, payload: { status: 'ACTIVE' } });
+    const r3 = await app.inject({ method: 'POST', url: `/slots/${booked.json().id}/recur`, cookies: { session: owner } });
+    expect(r3.statusCode).toBe(200);
+    expect(r3.json().createdSlotIds).toHaveLength(2);
+  });
+
+  it('recur legt höchstens 53 Folgetermine an', async () => {
+    const owner = await loginAs('recur-cap@example.com');
+    const user = await db.prisma.user.findUniqueOrThrow({ where: { email: 'recur-cap@example.com' } });
+    // Altprojekt über 2 Jahre (die 366-Tage-Grenze gilt nur beim Schreiben über die API).
+    const project = await db.prisma.prayerProject.create({
+      data: {
+        title: 'Recur Cap', organizerId: user.id, status: 'ACTIVE', visibility: 'PUBLIC',
+        inviteToken: 'recur-cap-token', startDate: new Date(BASE), endDate: new Date(BASE + 2 * 366 * 24 * HOUR),
+      },
+    });
+    const base = await db.prisma.prayerSlot.create({
+      data: { projectId: project.id, userId: user.id, startTime: new Date(BASE), endTime: new Date(BASE + HOUR), status: 'BOOKED' },
+    });
+    const recur = await app.inject({ method: 'POST', url: `/slots/${base.id}/recur`, cookies: { session: owner } });
+    expect(recur.statusCode).toBe(200);
+    expect(recur.json().createdSlotIds).toHaveLength(53);
   });
 });

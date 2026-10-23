@@ -32,9 +32,14 @@ const Timezone = z.string().min(1).refine(isValidTimezone, 'Ungültige Zeitzone'
 export const ProjectStatus = z.enum(['DRAFT', 'ACTIVE', 'PAUSED', 'ARCHIVED']);
 export const ProjectVisibility = z.enum(['PUBLIC', 'PRIVATE']);
 
+const Title = z.string().trim()
+  .min(1, 'Titel darf nicht leer sein')
+  .max(120, 'Titel darf höchstens 120 Zeichen haben');
+const Description = z.string().max(5000, 'Beschreibung darf höchstens 5000 Zeichen haben');
+
 export const CreateProjectBody = z.object({
-  title: z.string().trim().min(1).max(120),
-  description: z.string().max(5000).optional(),
+  title: Title,
+  description: Description.optional(),
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
   timezone: Timezone.default('Europe/Berlin'),
@@ -54,11 +59,11 @@ export const CreateProjectBody = z.object({
 });
 
 export const UpdateProjectBody = z.object({
-  title: z.string().trim().min(1).max(120).optional(),
+  title: Title.optional(),
   locationName: z.string().min(1).max(120).nullable().optional(),
   locationLat: z.number().min(-90).max(90).nullable().optional(),
   locationLon: z.number().min(-180).max(180).nullable().optional(),
-  description: z.string().max(5000).nullable().optional(),
+  description: Description.nullable().optional(),
   status: ProjectStatus.optional(),
   visibility: ProjectVisibility.optional(),
   maskNames: z.boolean().optional(),
