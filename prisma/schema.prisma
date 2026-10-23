@@ -175,7 +175,10 @@ model MagicToken {
   id        String    @id @default(cuid())
   token     String    @unique
   code      String?   // 6-stelliger Login-Code (gehasht) — Alternative zum Link für andere Geräte
-  codeAttempts Int    @default(0) // Brute-Force-Bremse: nach 5 Fehlversuchen gesperrt
+  codeAttempts Int    @default(0) // Brute-Force-Bremse: Summe über alle gültigen Tokens des Users ≤ MAX_CODE_ATTEMPTS
+  // Vom Client beim Anfordern gewünschte UI-Sprache. Wandert erst beim Einlösen auf User.locale —
+  // das bloße Anfordern eines Links kann jeder für jede Adresse auslösen (A11a).
+  locale    String?
   userId    String
   user      User      @relation(fields: [userId], references: [id])
   expiresAt DateTime

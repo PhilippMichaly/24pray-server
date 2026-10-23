@@ -10,6 +10,11 @@ import { notifyAdmin } from '../lib/adminNotify.js';
 const MAGIC_TTL_MS = 15 * 60 * 1000;
 // Grace-Fenster, in dem ein konsumierter Magic-Token idempotent erneut Erfolg liefert (§6.4).
 const VERIFY_GRACE_MS = 30 * 1000;
+// A6: Code-Fehlversuche pro Nutzer, summiert über ALLE nicht abgelaufenen Tokens (ein frischer
+// Link setzt den Zähler nicht zurück). Bei 6 Ziffern sind 5 Versuche je 15 min ≈ 1:200 000.
+export const MAX_CODE_ATTEMPTS = 5;
+// N4: Mehr als 3 Links je Adresse im TTL-Fenster → still 204 ohne Mail (Mail-Bombing über fremde Adressen).
+export const MAX_LINKS_PER_EMAIL = 3;
 
 export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; mailer: Mailer; env: Env }) {
   const { prisma, mailer, env } = deps;
@@ -19,13 +24,22 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
   }, async (req, reply) => {
     const { email, locale } = MagicLinkBody.parse(req.body);
     const name = email.split('@')[0];
+    // A11a: Die Sprache wird nur beim Anlegen gesetzt. Für Bestandsnutzer wandert sie mit dem
+    // Token und greift erst beim Einlösen (createSession) — sonst könnte jeder per Eintippen
+    // einer fremden Adresse deren Mail-Sprache umstellen.
     const user = await prisma.user.upsert({
       where: { email },
-      // Nur updaten, wenn der Client eine Sprache mitsendet (letzte gewinnt) —
-      // locale-lose Logins (alte Clients, Test-Helfer) dürfen den Bestand nicht auf de zurücksetzen.
-      update: locale ? { locale } : {},
+      update: {},
       create: { email, name, locale: locale ?? 'de' },
     });
+    // N4: Antwort für „zu viele Links" identisch zur Normalantwort ohne Opt-in (204, leer) —
+    // auch im DEV_LOGIN_RESPONSE-Modus kein devLoginUrl, sonst wäre das Limit umgehbar.
+    const recentLinks = await prisma.magicToken.count({
+      where: { userId: user.id, createdAt: { gt: new Date(Date.now() - MAGIC_TTL_MS) } },
+    });
+    if (recentLinks >= MAX_LINKS_PER_EMAIL) {
+      return reply.code(204).send();
+    }
     const raw = generateToken();
     const code = generateLoginCode(); // Alternative zum Link: Anmelden auf einem anderen Gerät
     await prisma.magicToken.create({
@@ -33,6 +47,7 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         token: hashToken(raw),
         code: hashToken(code),
         userId: user.id,
+        locale: locale ?? null,
         expiresAt: new Date(Date.now() + MAGIC_TTL_MS),
       },
     });
@@ -65,16 +80,22 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
       await prisma.magicToken.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
     }
 
-    return createSession(reply, record.userId);
+    return createSession(reply, record.userId, record.locale);
   });
 
-  // Gemeinsame Session-Erstellung für Link- und Code-Login.
-  async function createSession(reply: import('fastify').FastifyReply, userId: string) {
+  // Gemeinsame Session-Erstellung für Link- und Code-Login. `locale` ist die beim Anfordern
+  // gewünschte Sprache des eingelösten Tokens — erst hier, nach bewiesenem Postfach-Zugriff,
+  // darf sie den User ändern (A11a).
+  async function createSession(reply: import('fastify').FastifyReply, userId: string, locale: string | null) {
     const raw = generateToken();
     const expiresAt = new Date(Date.now() + env.SESSION_TTL_DAYS * 86400_000);
     await prisma.session.create({ data: { token: hashToken(raw), userId, expiresAt } });
 
     const u = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (locale && locale !== u.locale) {
+      await prisma.user.update({ where: { id: u.id }, data: { locale } });
+      u.locale = locale;
+    }
 
     // Betreiber-Benachrichtigung „neues Konto": bewusst HIER und nicht beim Magic-Link-Upsert.
     // Dort entsteht der User-Datensatz schon durch bloßes Eintippen einer fremden Adresse —
@@ -99,6 +120,8 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
     config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, async (req, reply) => {
     const { email, code } = VerifyCodeBody.parse(req.body);
+    // Ein Fehlertext für alle Fälle (unbekannte Adresse, kein Token, gesperrt, falscher Code) —
+    // sonst ließe sich über die Antwort ablesen, ob eine Adresse existiert.
     const fail = () => reply.code(400).send({ message: 'Code ungültig oder abgelaufen' });
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return fail();
@@ -106,13 +129,25 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
       where: { userId: user.id, consumedAt: null, expiresAt: { gt: new Date() }, code: { not: null } },
       orderBy: { createdAt: 'desc' },
     });
-    if (!record || record.codeAttempts >= 5) return fail(); // Brute-Force-Bremse
-    if (record.code !== hashToken(code)) {
-      await prisma.magicToken.update({ where: { id: record.id }, data: { codeAttempts: { increment: 1 } } });
-      return fail();
-    }
+    if (!record) return fail();
+    // A6: Versuch atomar reservieren, BEVOR verglichen wird. Die Grenze gilt pro Nutzer über
+    // alle nicht abgelaufenen Tokens (auch konsumierte und ältere — ein frischer Link setzt
+    // nichts zurück). Summe und Inkrement stehen bewusst in EINEM UPDATE-Statement: SQLite
+    // führt es unter der Schreibsperre aus, parallele Requests — auch über verschiedene Tokens
+    // desselben Users — werden serialisiert und jeder sieht die Reservierungen der vorigen.
+    // Ein getrenntes `aggregate` vor einem `updateMany` würde die Summe VOR der Reservierung
+    // lesen und könnte bei N parallelen Requests N Vergleiche durchlassen.
+    // DateTime liegt in SQLite als Epoch-Millisekunden (INTEGER), siehe projects.ts /shift.
+    const reserved = await prisma.$executeRaw`
+      UPDATE MagicToken SET codeAttempts = codeAttempts + 1
+      WHERE id = ${record.id}
+        AND (SELECT COALESCE(SUM(codeAttempts), 0) FROM MagicToken
+             WHERE userId = ${user.id} AND expiresAt > ${Date.now()}) < ${MAX_CODE_ATTEMPTS}`;
+    if (reserved === 0) return fail();
+    if (record.code !== hashToken(code)) return fail();
+    // Zähler bleibt stehen (Token wird ohnehin konsumiert und zählt bis zum Ablauf weiter mit).
     await prisma.magicToken.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
-    return createSession(reply, record.userId);
+    return createSession(reply, record.userId, record.locale);
   });
 
   app.get('/auth/me', async (req) => requireUser(req));

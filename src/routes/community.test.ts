@@ -15,8 +15,14 @@ const updates: { email: string; n: UpdateNoticeMail }[] = [];
 let loginSeq = 0;
 async function loginAs(email: string): Promise<string> {
   const remoteAddress = `10.1.0.${++loginSeq}`;
+  // N4: höchstens 3 Links je Adresse in 15 min — diese Suite loggt dieselbe Adresse öfter ein.
+  // Ältere Links altern lassen (= Zeit vergeht), sonst antwortet der 4. Request still 204 und
+  // captured.at(-1) wäre der Link eines ANDEREN Users.
+  await db.prisma.magicToken.updateMany({ where: { user: { email } }, data: { createdAt: new Date(Date.now() - 16 * 60_000) } });
   await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email }, remoteAddress });
-  const token = new URL(captured.at(-1)!.url).searchParams.get('token')!;
+  const mail = captured.at(-1)!;
+  if (mail.email !== email) throw new Error(`loginAs: kein Magic-Link für ${email} (letzte Mail an ${mail.email})`);
+  const token = new URL(mail.url).searchParams.get('token')!;
   const verify = await app.inject({ method: 'POST', url: '/auth/verify', payload: { token }, remoteAddress });
   return verify.cookies.find((c) => c.name === 'session')!.value;
 }
