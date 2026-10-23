@@ -12,10 +12,13 @@ npx prisma migrate dev
 npm run dev   # http://localhost:3001
 ```
 
-Ohne `SMTP_URL` werden Magic-Links in die Konsole geloggt **und**
-`/auth/magic-link` liefert `{devLoginUrl}` zurück (Testmodus — das Frontend
-zeigt dann einen Direkt-Login-Button). Mit gesetztem `SMTP_URL` gehen echte
-Mails raus und der Testmodus verschwindet automatisch.
+Ohne `SMTP_URL` werden Magic-Links in die Konsole geloggt. Mit
+`DEV_LOGIN_RESPONSE=true` (nur lokal/E2E, steht in `.env.example`) liefert
+`/auth/magic-link` zusätzlich `{devLoginUrl}` zurück (Testmodus — das Frontend
+zeigt dann einen Direkt-Login-Button). Mit `COOKIE_SECURE=true` oder einer
+`https://`-`APP_URL` verweigert die API mit diesem Opt-in den Start. Mit gesetztem
+`SMTP_URL` gehen echte Mails raus; dann ist `UNSUBSCRIBE_SECRET` (mind. 32 Zeichen)
+Pflicht. Die API bindet per Default an `127.0.0.1` (`HOST`).
 
 ```bash
 npm test   # Vitest: Auth (inkl. StrictMode-Idempotenz), Slots (Grid/Booking/
@@ -40,7 +43,7 @@ npm test   # Vitest: Auth (inkl. StrictMode-Idempotenz), Slots (Grid/Booking/
 
 **Auth** (`src/routes/auth.ts`)
 - `POST /auth/magic-link` — E-Mail rein, Link+6-stelliger Code raus (rate-limited 5/min/IP).
-  Ohne `SMTP_URL` liefert die Response direkt `{devLoginUrl}` (Testmodus).
+  Mit `DEV_LOGIN_RESPONSE=true` liefert die Response direkt `{devLoginUrl}` (Testmodus).
 - `POST /auth/verify` — Token aus dem Link einlösen → Session-Cookie. Idempotent für
   30s nach Verbrauch (React-StrictMode feuert den Aufruf doppelt).
 - `POST /auth/verify-code` — 6-stelliger Code (Alternative für ein anderes Gerät ohne

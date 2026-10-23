@@ -10,7 +10,7 @@ const captured: { email: string; url: string; code?: string }[] = [];
 
 beforeAll(async () => {
   db = await makeTestDb();
-  const env = parseEnv({ APP_URL: 'http://localhost:3000' });
+  const env = parseEnv({ APP_URL: 'http://localhost:3000', DEV_LOGIN_RESPONSE: 'true' });
   app = await buildApp({
     prisma: db.prisma,
     env,
@@ -31,7 +31,7 @@ function tokenFrom(url: string): string {
 describe('auth flow', () => {
   it('full cycle: magic-link -> verify -> me -> logout', async () => {
     const ml = await app.inject({ method: 'POST', url: '/auth/magic-link', payload: { email: 'a@example.com' } });
-    // Ohne SMTP (Testmodus): 200 + devLoginUrl statt 204 (Mail-los einloggbar).
+    // Opt-in DEV_LOGIN_RESPONSE (lokal/E2E): 200 + devLoginUrl statt 204 (Mail-los einloggbar).
     expect(ml.statusCode).toBe(200);
     expect(ml.json().devLoginUrl).toContain('/auth/verify?token=');
     expect(captured.at(-1)!.email).toBe('a@example.com');
@@ -52,6 +52,22 @@ describe('auth flow', () => {
 
     const after = await app.inject({ method: 'GET', url: '/auth/me', cookies: { session: cookie.value } });
     expect(after.statusCode).toBe(401);
+  });
+
+  it('liefert ohne DEV_LOGIN_RESPONSE keinen devLoginUrl, auch ohne SMTP', async () => {
+    const quietApp = await buildApp({
+      prisma: db.prisma,
+      env: parseEnv({ APP_URL: 'http://localhost:3000' }),
+      mailer: { async sendMagicLink() {} },
+    });
+    await quietApp.ready();
+    try {
+      const res = await quietApp.inject({ method: 'POST', url: '/auth/magic-link', payload: { email: 'q@example.com' } });
+      expect(res.statusCode).toBe(204);
+      expect(res.body).toBe('');
+    } finally {
+      await quietApp.close();
+    }
   });
 
   it('me without cookie is 401', async () => {

@@ -109,12 +109,17 @@ DATABASE_URL=file:/opt/24pray/data/24pray.db
 SESSION_TTL_DAYS=30
 # Phase 1 (HTTP): false — nach HTTPS zwingend true
 COOKIE_SECURE=false
-# Leer = Testmodus: /auth/magic-link liefert {devLoginUrl}, Login ohne Postfach.
-# Gesetzt = echter Versand, Testmodus-Button verschwindet automatisch.
+# SMTP-Versand der Magic-Links. Gesetzt = echter Versand.
+# Ein leeres SMTP_URL liefert KEINEN Login-Link mehr in der Response; das macht nur
+# DEV_LOGIN_RESPONSE=true, und das gehoert NIE in diese Datei (nur lokal/E2E; mit
+# COOKIE_SECURE=true oder https-APP_URL verweigert die API den Start).
 SMTP_URL=
 SMTP_FROM=24pray <no-reply@24pray.org>
-# Signiert Abmelde-Links der Update-Mails (Backlog 1) — in Prod IMMER setzen (openssl rand -hex 32)
+# Signiert Abmelde-Links der Update-Mails (Backlog 1). Mit gesetztem SMTP_URL Pflicht,
+# mind. 32 Zeichen, sonst startet die API nicht: UNSUBSCRIBE_SECRET=<openssl rand -hex 32>
 UNSUBSCRIBE_SECRET=
+# Bind-Adresse der API; Default 127.0.0.1 (nginx davor). Nicht auf 0.0.0.0 setzen.
+# HOST=127.0.0.1
 # Lese-Token fuer GET /stats/funnel (Backlog 8) — lang+zufaellig; leer = Endpoint aus (404)
 FUNNEL_TOKEN=
 # Empfaenger der Nutzer-Feedback-Mails (Footer-Dialog) — leer = Feature aus (404)
@@ -226,7 +231,8 @@ curl -s http://$IP/api/health                          # {"ok":true}
 curl -s -o /dev/null -w "%{http_code}\n" http://$IP/   # 200
 curl -s -X POST http://$IP/api/auth/magic-link \
   -H 'Content-Type: application/json' -d '{"email":"du@example.com"}'
-# → {"devLoginUrl":"http://<IP>/auth/verify?token=…"} = Testmodus-Login funktioniert
+# → 204 (Mail unterwegs). Ein {"devLoginUrl":…} gibt es nur mit DEV_LOGIN_RESPONSE=true,
+#   das auf dem Server nie gesetzt sein darf.
 ```
 
 ## 8. Backup (täglich, 14 Tage Rotation)

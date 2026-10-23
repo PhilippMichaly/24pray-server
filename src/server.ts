@@ -15,8 +15,8 @@ async function main() {
   const pushSender = createPushSender(env); // Backlog 7: Zweitkanal, einmal erzeugt und wiederverwendet
   const app = await buildApp({ prisma, env, mailer, pushSender });
 
-  await app.listen({ port: env.PORT, host: '0.0.0.0' });
-  console.log(`24pray-api listening on :${env.PORT} (APP_URL=${env.APP_URL})`);
+  await app.listen({ port: env.PORT, host: env.HOST });
+  console.log(`24pray-api listening on ${env.HOST}:${env.PORT} (APP_URL=${env.APP_URL})`);
   // W3.2: Completion- + Reminder-Job (minütlich)
   const stopJobs = startJobs({ prisma, mailer, appUrl: env.APP_URL, pushSender });
 
