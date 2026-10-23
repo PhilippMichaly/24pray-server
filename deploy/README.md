@@ -77,7 +77,8 @@ chown -R pray:pray /opt/24pray'
 ```bash
 RS="rsync -az --delete -e 'ssh -i ~/.ssh/24pray_vps -o IdentitiesOnly=yes' \
   --exclude node_modules --exclude .next --exclude .git \
-  --exclude data --exclude .env --exclude .env.local --exclude .env.production"
+  --exclude data --exclude .env --exclude .env.local --exclude .env.production \
+  --exclude .superpowers --exclude docs --exclude coverage"
 eval $RS ~/24pray-api/ root@$IP:/opt/24pray/api/
 eval $RS ~/24pray-web/ root@$IP:/opt/24pray/web/
 $SSH 'chown -R pray:pray /opt/24pray'
@@ -287,8 +288,10 @@ Verzeichnis `0700` halten die Backups privat. Das Skript bricht bei jedem Fehler
 erst dann um; die Rotation laeuft nur nach Erfolg. Voraussetzung: `sqlite3` ist installiert.
 Der Off-site-Pull (rrsync als root) liest weiterhin `24pray-*.db` aus `/opt/24pray/backup`.
 
-Restore: Dienst stoppen → Backup-Datei nach `/opt/24pray/data/24pray.db`
-kopieren → `systemctl start 24pray-api`.
+Restore: Dienst stoppen (`systemctl stop 24pray-api`) → `24pray.db-wal` und `24pray.db-shm`
+in `/opt/24pray/data` entfernen (ein stehengebliebenes WAL der alten DB würde sonst auf die
+zurückgespielte Datei angewendet und sie korrumpieren) → Backup-Datei nach
+`/opt/24pray/data/24pray.db` kopieren → `systemctl start 24pray-api`.
 
 ## 8b. Städte-Datenbank (Geocoding, W3.6)
 
@@ -391,7 +394,8 @@ curl -v --url smtps://smtp.strato.de:465 --user 'no-reply@24pray.org:<PASSWORT>'
 IP=217.154.240.224
 RS="rsync -az --delete -e 'ssh -i ~/.ssh/24pray_vps -o IdentitiesOnly=yes' \
   --exclude node_modules --exclude .next --exclude .git \
-  --exclude data --exclude .env --exclude .env.local --exclude .env.production"
+  --exclude data --exclude .env --exclude .env.local --exclude .env.production \
+  --exclude .superpowers --exclude docs --exclude coverage"
 eval $RS ~/24pray-api/ root@$IP:/opt/24pray/api/
 eval $RS ~/24pray-web/ root@$IP:/opt/24pray/web/
 ssh -i ~/.ssh/24pray_vps root@$IP '
