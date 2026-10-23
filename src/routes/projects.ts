@@ -9,6 +9,10 @@ import { notifyAdmin } from '../lib/adminNotify.js';
 import type { Mailer } from '../lib/mailer.js';
 import type { Env } from '../env.js';
 
+/** A5: Obergrenzen gegen Massenanlage und gegen eine unbegrenzte öffentliche Liste. */
+export const MAX_PROJECTS_PER_DAY = 10;
+export const PROJECT_LIST_LIMIT = 100;
+
 function httpError(status: number, message: string) {
   const e = new Error(message) as Error & { statusCode?: number };
   e.statusCode = status;
@@ -45,27 +49,45 @@ async function collectFutureBookedRecipients(
   return [...byEmail.values()];
 }
 
-export function projectRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env }) {
+export function projectRoutes(
+  app: FastifyInstance,
+  deps: { prisma: PrismaClient; mailer?: Mailer; env?: Env; disableWriteRateLimits?: boolean },
+) {
   const { prisma, mailer, env } = deps;
+  const createRateLimit = deps.disableWriteRateLimits ? false : { max: 5, timeWindow: '1 minute' };
 
-  // List: public projects + caller's own
+  // List: die neuesten PROJECT_LIST_LIMIT öffentlichen Projekte + alle eigenen (ohne Limit)
   app.get('/projects', async (req) => {
     const user = req.user;
-    const projects = await prisma.prayerProject.findMany({
-      where: user
-        ? { OR: [{ visibility: 'PUBLIC' }, { organizerId: user.id }] }
-        : { visibility: 'PUBLIC' },
+    const pub = await prisma.prayerProject.findMany({
+      where: { visibility: 'PUBLIC' },
       include: { organizer: true },
       orderBy: { createdAt: 'desc' },
+      take: PROJECT_LIST_LIMIT,
     });
-    return toProjectListWithStats(prisma, projects, req.user?.id);
+    const own = user
+      ? await prisma.prayerProject.findMany({
+          where: { organizerId: user.id },
+          include: { organizer: true },
+          orderBy: { createdAt: 'desc' },
+        })
+      : [];
+    const byId = new Map([...pub, ...own].map((p) => [p.id, p]));
+    const projects = [...byId.values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return toProjectListWithStats(prisma, projects, user?.id);
   });
 
   // Create
-  app.post('/projects', async (req) => {
+  app.post('/projects', { config: { rateLimit: createRateLimit } }, async (req) => {
     const user = requireUser(req);
     const body = CreateProjectBody.parse(req.body);
     assertProjectSpan(new Date(body.startDate), new Date(body.endDate));
+    const createdToday = await prisma.prayerProject.count({
+      where: { organizerId: user.id, createdAt: { gt: new Date(Date.now() - 24 * 3600_000) } },
+    });
+    if (createdToday >= MAX_PROJECTS_PER_DAY) {
+      throw httpError(429, 'Zu viele neue Gebetswachen heute');
+    }
     const project = await prisma.prayerProject.create({
       data: {
         title: body.title,

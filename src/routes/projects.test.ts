@@ -775,3 +775,97 @@ describe('Task 7 — Einladungslink erneuern, Mitglied entfernen', () => {
     expect(await db.prisma.prayerSlot.count({ where: { projectId: id } })).toBe(1);
   });
 });
+
+describe('Anlage drosseln und Liste begrenzen (A5)', () => {
+  const body = (title: string, visibility = 'PUBLIC') =>
+    ({ title, startDate: future(1), endDate: future(4), visibility });
+
+  it('11. Projekt eines Users innerhalb 24 h -> 429; Fenster rollt; andere User unberuehrt', async () => {
+    const owner = await loginAs('a5-daily@example.com');
+    const codes: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const r = await app.inject({ method: 'POST', url: '/projects', cookies: { session: owner }, payload: body(`A5 ${i}`) });
+      codes.push(r.statusCode);
+      if (i === 10) expect(r.json().message).toBe('Zu viele neue Gebetswachen heute');
+    }
+    expect(codes.slice(0, 10)).toEqual(Array(10).fill(200));
+    expect(codes[10]).toBe(429);
+
+    const other = await loginAs('a5-daily-other@example.com');
+    const ok = await app.inject({ method: 'POST', url: '/projects', cookies: { session: other }, payload: body('A5 other') });
+    expect(ok.statusCode).toBe(200);
+
+    // Aeltere als 24 h zaehlen nicht mehr.
+    const user = await db.prisma.user.findUnique({ where: { email: 'a5-daily@example.com' } });
+    await db.prisma.prayerProject.updateMany({
+      where: { organizerId: user!.id },
+      data: { createdAt: new Date(Date.now() - 25 * 3600_000) },
+    });
+    const again = await app.inject({ method: 'POST', url: '/projects', cookies: { session: owner }, payload: body('A5 again') });
+    expect(again.statusCode).toBe(200);
+  });
+
+  it('limitiert POST /projects auf 5 pro Minute und IP (6. Request 429)', async () => {
+    // Eigene App-Instanz OHNE disableWriteRateLimits — der Zaehler ist pro Instanz.
+    const limited = await buildApp({
+      prisma: db.prisma,
+      env: parseEnv({ APP_URL: 'http://localhost:3000' }),
+      mailer: { async sendMagicLink() {} },
+    });
+    await limited.ready();
+    try {
+      const owner = await loginAs('a5-ip@example.com');
+      const codes: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        const r = await limited.inject({
+          method: 'POST', url: '/projects', cookies: { session: owner }, remoteAddress: '10.8.0.1',
+          payload: body(`A5 ip ${i}`),
+        });
+        codes.push(r.statusCode);
+      }
+      expect(codes.slice(0, 5)).toEqual(Array(5).fill(200));
+      expect(codes[5]).toBe(429);
+    } finally {
+      await limited.close();
+    }
+  });
+
+  it('GET /projects: anonym hoechstens 100 oeffentliche, eingeloggt zusaetzlich die eigenen privaten', async () => {
+    await db.prisma.prayerProject.deleteMany({});
+    const owner = await db.prisma.user.create({ data: { email: 'a5-list-owner@example.com', name: 'a5o' } });
+    const me = await db.prisma.user.create({ data: { email: 'a5-list-me@example.com', name: 'a5m' } });
+    const base = {
+      description: null, startDate: new Date(NOW + 3600_000), endDate: new Date(NOW + 4 * 3600_000),
+      timezone: 'UTC', language: 'de', slotDurationMinutes: 60, status: 'ACTIVE',
+    };
+    for (let i = 0; i < 105; i++) {
+      await db.prisma.prayerProject.create({
+        data: { ...base, title: `pub ${i}`, visibility: 'PUBLIC', inviteToken: `a5-pub-${i}`, organizerId: owner.id,
+          createdAt: new Date(NOW - (200 - i) * 60_000) },
+      });
+    }
+    // Eigene PUBLIC-Wache, alt genug um ausserhalb der neuesten 100 zu liegen, plus eigene private.
+    await db.prisma.prayerProject.create({
+      data: { ...base, title: 'mine old public', visibility: 'PUBLIC', inviteToken: 'a5-mine-pub', organizerId: me.id,
+        createdAt: new Date(NOW - 1000 * 60_000) },
+    });
+    await db.prisma.prayerProject.create({
+      data: { ...base, title: 'mine private', visibility: 'PRIVATE', inviteToken: 'a5-mine-priv', organizerId: me.id,
+        createdAt: new Date(NOW - 500 * 60_000) },
+    });
+    const anon = await app.inject({ method: 'GET', url: '/projects' });
+    const anonList = anon.json() as { title: string }[];
+    expect(anonList).toHaveLength(100);
+    expect(anonList.every((p) => p.title.startsWith('pub '))).toBe(true);
+
+    const session = await loginAs('a5-list-me@example.com');
+    const mine = await app.inject({ method: 'GET', url: '/projects', cookies: { session } });
+    const list = mine.json() as { id: string; title: string; createdAt: string }[];
+    expect(list).toHaveLength(102); // 100 oeffentliche (neueste) + 2 eigene, ohne Duplikate
+    expect(new Set(list.map((p) => p.id)).size).toBe(102);
+    expect(list.map((p) => p.title)).toContain('mine private');
+    expect(list.map((p) => p.title)).toContain('mine old public');
+    const times = list.map((p) => Date.parse(p.createdAt));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+  });
+});
