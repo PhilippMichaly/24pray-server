@@ -28,3 +28,17 @@ export function safeEqual(a: string, b: string): boolean {
 export function singleHeader(value: string | string[] | undefined): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
+
+/**
+ * Wie oft ein Header im Original-Request stand. Node reduziert manche Header (u. a.
+ * Authorization) in `req.headers` stillschweigend auf das erste Vorkommen; Duplikate
+ * sieht man nur in `rawHeaders` (abwechselnd Name, Wert).
+ */
+export function rawHeaderCount(rawHeaders: string[], name: string): number {
+  const wanted = name.toLowerCase();
+  let count = 0;
+  for (let i = 0; i < rawHeaders.length; i += 2) {
+    if (rawHeaders[i].toLowerCase() === wanted) count++;
+  }
+  return count;
+}

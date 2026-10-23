@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateToken, hashToken, safeEqual } from './tokens.js';
+import { generateToken, hashToken, rawHeaderCount, safeEqual } from './tokens.js';
 
 describe('tokens', () => {
   it('generates a long random url-safe token', () => {
@@ -23,5 +23,14 @@ describe('safeEqual', () => {
     expect(safeEqual('a', 'b')).toBe(false);
     expect(safeEqual('a', 'aa')).toBe(false);
     expect(safeEqual('', 'a')).toBe(false);
+  });
+
+  it('rawHeaderCount zählt Header-Vorkommen in rawHeaders (Name case-insensitiv)', () => {
+    const raw = ['Authorization', 'Bearer a', 'host', 'x', 'authorization', 'Bearer b'];
+    expect(rawHeaderCount(raw, 'authorization')).toBe(2);
+    expect(rawHeaderCount(raw, 'host')).toBe(1);
+    expect(rawHeaderCount(raw, 'cookie')).toBe(0);
+    // Werte zählen nicht als Namen
+    expect(rawHeaderCount(['x-a', 'authorization'], 'authorization')).toBe(0);
   });
 });
