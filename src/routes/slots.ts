@@ -8,7 +8,7 @@ import { generateToken } from '../lib/tokens.js';
 import { requireUser } from '../plugins/auth.js';
 import { BookSlotBody } from '../schemas/slots.js';
 import { buildSlotGrid, slotLengthMs, type BookedSlotInput } from '../lib/slotGrid.js';
-import { canReadProject, ensureMembership } from '../lib/access.js';
+import { canReadProject, ensureMembership, isParticipant } from '../lib/access.js';
 import { notifyAdmin } from '../lib/adminNotify.js';
 import { bumpFunnel } from './funnel.js';
 
@@ -64,13 +64,17 @@ export function slotRoutes(
       userName: s.user?.name ?? null,
       guestName: s.guestName,
     }));
+    const requesterId = req.user?.id ?? null;
+    // A9: Teilnahme nur prüfen, wenn sie etwas ändert (maskNames-Opt-in) — einmal pro Request.
+    const viewerIsParticipant = project.maskNames && (await isParticipant(prisma, project, requesterId));
     return buildSlotGrid(
       project.startDate,
       project.endDate,
       booked,
-      req.user?.id ?? null,
+      requesterId,
       project.slotDurationMinutes,
       project.maskNames,
+      viewerIsParticipant,
     );
   });
 

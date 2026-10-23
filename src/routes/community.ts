@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { requireUser } from '../plugins/auth.js';
-import { canReadProject } from '../lib/access.js';
+import { canReadProject, isParticipant } from '../lib/access.js';
 import { maskName } from '../lib/slotGrid.js';
 import type { Env } from '../env.js';
 import type { Mailer, UpdateNoticeMail } from '../lib/mailer.js';
@@ -95,10 +95,11 @@ export function communityRoutes(
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
-    const anonymous = !req.user && project.maskNames; // Masking nur bei Projekt-Opt-in
+    // Masking nur bei Projekt-Opt-in und nur für Nicht-Teilnehmer (A9: auch eingeloggte ohne Membership).
+    const masked = project.maskNames && !(await isParticipant(prisma, project, req.user?.id ?? null));
     return items.map((r) => ({
       id: r.id,
-      authorName: anonymous ? maskName(r.authorName) : r.authorName, // §E5 auch im Feed
+      authorName: masked ? maskName(r.authorName) : r.authorName, // §E5 auch im Feed
       text: r.text,
       createdAt: r.createdAt.toISOString(),
     }));
@@ -201,10 +202,11 @@ export function communityRoutes(
       e.hours += hoursPerSlot;
       byPerson.set(key, e);
     }
-    const anonymous = !req.user && project.maskNames; // Masking nur bei Projekt-Opt-in
+    // Masking nur bei Projekt-Opt-in und nur für Nicht-Teilnehmer (A9: auch eingeloggte ohne Membership).
+    const masked = project.maskNames && !(await isParticipant(prisma, project, req.user?.id ?? null));
     const perPerson = [...byPerson.values()]
       .sort((a, b) => b.hours - a.hours)
-      .map((p) => ({ name: anonymous ? maskName(p.name) : p.name, hours: Math.round(p.hours * 100) / 100 }));
+      .map((p) => ({ name: masked ? maskName(p.name) : p.name, hours: Math.round(p.hours * 100) / 100 }));
     return {
       completedHours: Math.round(done.length * hoursPerSlot * 100) / 100,
       perPerson,

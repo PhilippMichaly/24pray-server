@@ -1,5 +1,6 @@
 import type { PrismaClient, PrayerProject } from '@prisma/client';
 import { maskName } from './slotGrid.js';
+import { isParticipant, participantProjectIds } from './access.js';
 
 /** Gehaltene Stunden: noch anstehend (BOOKED) oder schon vorbei (COMPLETED, setzt der
  *  Completion-Job). Nur BOOKED zu zählen ließ „X von Y gehalten" während der Wache sinken. */
@@ -45,8 +46,16 @@ export async function toProjectListWithStats(
     _count: { _all: true },
   });
   const byProject = new Map(counts.map((c) => [c.projectId, c._count._all]));
+  // A9: Teilnahme für alle maskNames-Projekte in EINER Membership-Abfrage (kein N+1).
+  const participating = await participantProjectIds(
+    prisma,
+    projects.filter((p) => p.maskNames),
+    requesterId ?? null,
+  );
   return Promise.all(
-    projects.map((p) => toProjectWithStats(prisma, p, requesterId, byProject.get(p.id) ?? 0)),
+    projects.map((p) =>
+      toProjectWithStats(prisma, p, requesterId, byProject.get(p.id) ?? 0, participating.has(p.id)),
+    ),
   );
 }
 
@@ -55,6 +64,7 @@ export async function toProjectWithStats(
   project: PrayerProject & { organizer?: { name: string } },
   requesterId?: string,
   precomputedBookedSlots?: number, // aus toProjectListWithStats (vermeidet N+1)
+  precomputedIsParticipant?: boolean, // aus toProjectListWithStats (vermeidet N+1)
 ): Promise<ProjectWithStats> {
   const organizerName =
     project.organizer?.name ??
@@ -65,6 +75,10 @@ export async function toProjectWithStats(
     (await prisma.prayerSlot.count({
       where: { projectId: project.id, status: { in: HELD_STATUSES } },
     }));
+  // A9: Masking nur bei Opt-in und nur für Nicht-Teilnehmer; Teilnahme nur dann prüfen.
+  const maskOrganizer =
+    project.maskNames &&
+    !(precomputedIsParticipant ?? (await isParticipant(prisma, project, requesterId ?? null)));
   const slotMs = project.slotDurationMinutes * 60 * 1000;
   const totalSlots = Math.max(
     0,
@@ -92,7 +106,7 @@ export async function toProjectWithStats(
     createdAt: project.createdAt.toISOString(),
     totalSlots,
     bookedSlots,
-    // Masking nur bei Projekt-Opt-in (§E5-Revision 2026-07-08) — Default ist Klartext.
-    organizerName: !requesterId && project.maskNames ? maskName(organizerName) ?? '' : organizerName,
+    // Masking nur bei Projekt-Opt-in (§E5-Revision 2026-07-08) und für Nicht-Teilnehmer (A9).
+    organizerName: maskOrganizer ? maskName(organizerName) ?? '' : organizerName,
   };
 }

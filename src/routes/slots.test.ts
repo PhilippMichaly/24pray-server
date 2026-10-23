@@ -285,6 +285,30 @@ function gslotName(s: { userName: string | null }): string | null {
   return s.userName;
 }
 
+describe('A9 — Grid maskiert für Nicht-Teilnehmer', () => {
+  it('maskNames: eingeloggter Nicht-Mitglied sieht maskiert, Mitglied und Organizer Klartext', async () => {
+    const owner = await loginAs('a9-grid-owner@example.com');
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'A9 Grid', startDate: at(0), endDate: at(6), visibility: 'PUBLIC', maskNames: true },
+    });
+    const pid = res.json().id as string;
+    const member = await loginAs('a9-grid-member@example.com');
+    await db.prisma.user.update({ where: { email: 'a9-grid-member@example.com' }, data: { name: 'Max Muster' } });
+    expect((await app.inject({ method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: member }, payload: { startTime: at(2) } })).statusCode).toBe(200);
+    const outsider = await loginAs('a9-grid-outsider@example.com');
+
+    const nameFor = async (cookie: string | null) => {
+      const grid = await app.inject({ method: 'GET', url: `/projects/${pid}/slots`, cookies: cookie ? { session: cookie } : undefined });
+      return grid.json().find((s: { startTime: string }) => s.startTime === at(2)).userName;
+    };
+    expect(await nameFor(outsider)).toBe('Max M.');
+    expect(await nameFor(null)).toBe('Max M.');
+    expect(await nameFor(member)).toBe('Max Muster');
+    expect(await nameFor(owner)).toBe('Max Muster');
+  });
+});
+
 describe('guestName-Grenzen', () => {
   it('leer nach trim oder > 80 Zeichen -> 400', async () => {
     const alice = await loginAs('guestname-limit@example.com');

@@ -20,7 +20,7 @@ const MINUTE_MS = 60 * 1000;
 /** Obergrenze für Grid-Einträge (366 Tage à 24 Stunden) — schützt vor Alt-Projekten mit absurder Dauer. */
 export const MAX_GRID_SLOTS = 366 * 24;
 
-/** „Ruth Klein" → „Ruth K." — serverseitige Maskierung für anonyme Betrachter (§E5). */
+/** „Ruth Klein" → „Ruth K." — serverseitige Maskierung für Nicht-Teilnehmer (§E5, A9). */
 export function maskName(n: string | null): string | null {
   if (!n) return n;
   const parts = n.trim().split(/\s+/).filter(Boolean);
@@ -41,8 +41,10 @@ export function buildSlotGrid(
   booked: BookedSlotInput[],
   requesterId: string | null,
   slotDurationMinutes: number,
-  maskNames = false, // Opt-in pro Projekt — Default ist Klartext (schafft Verbindung)
+  maskNames: boolean, // Opt-in pro Projekt — ohne Opt-in Klartext (schafft Verbindung)
+  viewerIsParticipant: boolean, // Organizer oder Mitglied (isParticipant) — sieht immer Klartext
 ): SlotView[] {
+  const mask = maskNames && !viewerIsParticipant;
   const slotMs = slotLengthMs(slotDurationMinutes);
   const byStart = new Map<number, BookedSlotInput>();
   for (const b of booked) byStart.set(b.startTime.getTime(), b);
@@ -57,8 +59,8 @@ export function buildSlotGrid(
       startTime: new Date(t).toISOString(),
       endTime: new Date(t + slotMs).toISOString(),
       status: hit ? 'BOOKED' : 'FREE',
-      // Nur bei Projekt-Opt-in: Namen für anonyme Betrachter maskieren (§E5-Revision).
-      userName: requesterId === null && maskNames ? maskName(rawName) : rawName,
+      // Nur bei Projekt-Opt-in: Namen für Nicht-Teilnehmer maskieren (§E5-Revision, A9).
+      userName: mask ? maskName(rawName) : rawName,
       isMine: requesterId !== null && hit?.userId === requesterId,
     });
   }

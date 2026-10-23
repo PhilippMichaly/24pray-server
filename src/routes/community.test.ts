@@ -132,6 +132,65 @@ describe('W3 — Anliegen-Feed', () => {
   });
 });
 
+describe('A9 — maskNames gilt für alle Nicht-Teilnehmer', () => {
+  it('eingeloggter Nicht-Mitglied sieht Feed, Bestenliste und organizerName maskiert; Mitglied und Organizer Klartext', async () => {
+    const owner = await loginAs('a9-owner@example.com');
+    await db.prisma.user.update({ where: { email: 'a9-owner@example.com' }, data: { name: 'Ruth Klein' } });
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'A9 maskiert', startDate: at(0), endDate: at(6), visibility: 'PUBLIC', maskNames: true },
+    });
+    const id = res.json().id as string;
+    await app.inject({
+      method: 'POST', url: `/projects/${id}/requests`, cookies: { session: owner },
+      payload: { text: 'Bitte betet mit.' },
+    });
+
+    // Mitglied: bucht einen Slot → Membership
+    const member = await loginAs('a9-member@example.com');
+    await db.prisma.user.update({ where: { email: 'a9-member@example.com' }, data: { name: 'Max Muster' } });
+    const book = await app.inject({ method: 'POST', url: `/projects/${id}/slots`, cookies: { session: member }, payload: { startTime: at(1) } });
+    expect(book.statusCode).toBe(200);
+    // Bestenliste speist sich aus COMPLETED-Slots
+    await db.prisma.prayerSlot.update({ where: { id: book.json().id }, data: { status: 'COMPLETED' } });
+
+    // Außenstehender: eingeloggt, aber ohne Membership
+    const outsider = await loginAs('a9-outsider@example.com');
+
+    const view = async (cookie: string | null) => {
+      const cookies = cookie ? { session: cookie } : undefined;
+      const feed = await app.inject({ method: 'GET', url: `/projects/${id}/requests`, cookies });
+      const stats = await app.inject({ method: 'GET', url: `/projects/${id}/stats`, cookies });
+      const one = await app.inject({ method: 'GET', url: `/projects/${id}`, cookies });
+      const list = await app.inject({ method: 'GET', url: '/projects', cookies });
+      return {
+        author: feed.json()[0].authorName,
+        leader: stats.json().perPerson[0].name,
+        organizer: one.json().organizerName,
+        organizerInList: list.json().find((p: { id: string }) => p.id === id).organizerName,
+      };
+    };
+
+    expect(await view(outsider)).toEqual({ author: 'Ruth K.', leader: 'Max M.', organizer: 'Ruth K.', organizerInList: 'Ruth K.' });
+    expect(await view(null)).toEqual({ author: 'Ruth K.', leader: 'Max M.', organizer: 'Ruth K.', organizerInList: 'Ruth K.' });
+    expect(await view(member)).toEqual({ author: 'Ruth Klein', leader: 'Max Muster', organizer: 'Ruth Klein', organizerInList: 'Ruth Klein' });
+    expect(await view(owner)).toEqual({ author: 'Ruth Klein', leader: 'Max Muster', organizer: 'Ruth Klein', organizerInList: 'Ruth Klein' });
+  });
+
+  it('nur Invite-Token ohne Membership: Namen bleiben maskiert', async () => {
+    const owner = await loginAs('a9-priv-owner@example.com');
+    await db.prisma.user.update({ where: { email: 'a9-priv-owner@example.com' }, data: { name: 'Ruth Klein' } });
+    const res = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: owner },
+      payload: { title: 'A9 privat', startDate: at(0), endDate: at(6), visibility: 'PRIVATE', maskNames: true },
+    });
+    const { id, inviteToken } = res.json();
+    const outsider = await loginAs('a9-priv-outsider@example.com');
+    const one = await app.inject({ method: 'GET', url: `/projects/${id}?invite=${inviteToken}`, cookies: { session: outsider } });
+    expect(one.json().organizerName).toBe('Ruth K.');
+  });
+});
+
 describe('W3 — Jobs + Statistik', () => {
   it('completeElapsedSlots setzt abgelaufene BOOKED auf COMPLETED; Stats zählen Stunden', async () => {
     const owner = await loginAs('w3-stats@example.com');
