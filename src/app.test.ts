@@ -115,3 +115,14 @@ describe('fix2 setErrorHandler — 500er sind generisch + serverseitig geloggt',
     }
   });
 });
+
+describe('Rate-Limit-Antwort (Important 3)', () => {
+  it('liefert 429 mit deutscher Meldung', async () => {
+    const hit = () => app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: 'rl-de@example.com' }, remoteAddress: '192.0.2.42' });
+    for (let i = 0; i < 5; i++) expect((await hit()).statusCode).not.toBe(429);
+    const res = await hit();
+    expect(res.statusCode).toBe(429);
+    expect(res.json()).toEqual({ message: 'Zu viele Anfragen – bitte in einer Minute noch einmal versuchen.' });
+  });
+});

@@ -48,7 +48,15 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
   const corsOrigins = [env.APP_URL, ...env.CORS_ORIGINS];
   await app.register(cors, { origin: corsOrigins, credentials: true });
   await app.register(cookie);
-  await app.register(rateLimit, { global: false });
+  // Important 3: Deutsche 429-Meldung für alle Routen. @fastify/rate-limit wirft den Rückgabewert
+  // des Builders; der eigene Error-Handler liest statusCode daraus (fehlt er, würde daraus ein 500).
+  await app.register(rateLimit, {
+    global: false,
+    errorResponseBuilder: () => ({
+      statusCode: 429,
+      message: 'Zu viele Anfragen – bitte in einer Minute noch einmal versuchen.',
+    }),
+  });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof ZodError) {
