@@ -156,3 +156,20 @@ describe('Backlog 1 — Locale-Erfassung beim Login', () => {
     expect(u.locale).toBe('he');
   });
 });
+
+describe('A1 — Rate-Limit pro Client hinter dem Proxy (trustProxy)', () => {
+  it('rate limit gilt pro X-Forwarded-For-Client hinter dem Proxy', async () => {
+    const hit = (ip: string) => app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: `rl-${ip}@example.com` }, remoteAddress: '127.0.0.1', headers: { 'x-forwarded-for': ip } });
+    for (let i = 0; i < 5; i++) expect((await hit('203.0.113.1')).statusCode).not.toBe(429);
+    expect((await hit('203.0.113.1')).statusCode).toBe(429);
+    expect((await hit('203.0.113.2')).statusCode).not.toBe(429);
+  });
+
+  it('X-Forwarded-For von einem Nicht-Proxy wird ignoriert', async () => {
+    const hit = (xff: string) => app.inject({ method: 'POST', url: '/auth/magic-link',
+      payload: { email: 'spoof@example.com' }, remoteAddress: '198.51.100.7', headers: { 'x-forwarded-for': xff } });
+    for (let i = 0; i < 5; i++) await hit(`10.0.0.${i}`);
+    expect((await hit('10.0.0.99')).statusCode).toBe(429);
+  });
+});

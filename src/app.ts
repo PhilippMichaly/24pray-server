@@ -37,7 +37,9 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
     /* z.B. read-only FS — App soll trotzdem starten */
   }
 
-  const app = Fastify({ logger: false });
+  // A1: Hinter nginx (127.0.0.1) liefert erst trustProxy die echte Client-IP aus X-Forwarded-For;
+  // nur Loopback ist vertrauenswürdig, X-Forwarded-For anderer Absender wird ignoriert.
+  const app = Fastify({ logger: false, trustProxy: ['127.0.0.1', '::1'] });
 
   // APP_URL immer erlaubt; CORS_ORIGINS fügt weitere Frontend-Origins hinzu (§6.5).
   const corsOrigins = [env.APP_URL, ...env.CORS_ORIGINS];
