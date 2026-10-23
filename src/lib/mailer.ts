@@ -124,9 +124,9 @@ const UPDATE_NOTICE_TEXTS: Record<string, {
   ar: { subject: (t) => `24pray — جديد من سهرة الصلاة (${t})`, posted: (a) => `نشر ${a} تحديثًا حول الطلب:`, toWatch: 'إلى سهرة الصلاة', unsubscribe: 'إيقاف رسائل التحديثات لهذه السهرة', dir: 'rtl' },
 };
 
-/** Minimal-Escaping für User-Content in Mail-HTML (Update-Text, Autor-Name). */
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/** Escaping für alle Nutzer-/DB-/URL-Werte in Mail-HTML (Text, doppelt UND einfach gequotete Attribute). */
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 export interface Mailer {
@@ -163,7 +163,7 @@ function formatReminderTime(r: { startTime: string; timezone: string; isAllDay?:
 function calendarBlock(googleUrl?: string, icsUrl?: string): { text: string; html: string } {
   if (!googleUrl && !icsUrl) return { text: '', html: '' };
   const text = `\n\nIn den Kalender eintragen:${googleUrl ? `\n  Google Kalender: ${googleUrl}` : ''}${icsUrl ? `\n  Andere Kalender (.ics): ${icsUrl}` : ''}`;
-  const html = `<p>In den Kalender eintragen:${googleUrl ? ` <a href="${googleUrl}">Google&nbsp;Kalender</a>` : ''}${googleUrl && icsUrl ? ' · ' : ''}${icsUrl ? `<a href="${icsUrl}">Andere Kalender (.ics)</a>` : ''}</p>`;
+  const html = `<p>In den Kalender eintragen:${googleUrl ? ` <a href="${escapeHtml(googleUrl)}">Google&nbsp;Kalender</a>` : ''}${googleUrl && icsUrl ? ' · ' : ''}${icsUrl ? `<a href="${escapeHtml(icsUrl)}">Andere Kalender (.ics)</a>` : ''}</p>`;
   return { text, html };
 }
 
@@ -270,14 +270,14 @@ export function createMailer(config: MailerConfig): Mailer {
         ? `\n\nOder gib diesen Code auf der Anmeldeseite ein — praktisch, wenn du dich auf einem anderen Gerät anmelden willst (z. B. am PC, während du diese Mail auf dem Handy liest):\n\n    ${code}\n`
         : '';
       const codeHtml = code
-        ? `<p>Oder gib diesen Code auf der Anmeldeseite ein — praktisch, wenn du dich auf einem <strong>anderen Gerät</strong> anmelden willst (z.&nbsp;B. am PC, während du diese Mail auf dem Handy liest):</p><p style="font-size:28px;letter-spacing:6px;font-weight:bold">${code}</p>`
+        ? `<p>Oder gib diesen Code auf der Anmeldeseite ein — praktisch, wenn du dich auf einem <strong>anderen Gerät</strong> anmelden willst (z.&nbsp;B. am PC, während du diese Mail auf dem Handy liest):</p><p style="font-size:28px;letter-spacing:6px;font-weight:bold">${escapeHtml(code)}</p>`
         : '';
       await transport.sendMail({
         from: config.from,
         to: email,
         subject: '24pray — dein Login-Link',
         text: `Klicke zum Einloggen: ${url}${codeText}\nLink und Code sind 15 Minuten gültig und nur einmal verwendbar.`,
-        html: `<p>Klicke zum Einloggen: <a href="${url}">${url}</a></p>${codeHtml}<p>Link und Code sind 15 Minuten gültig und nur einmal verwendbar.</p>`,
+        html: `<p>Klicke zum Einloggen: <a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>${codeHtml}<p>Link und Code sind 15 Minuten gültig und nur einmal verwendbar.</p>`,
       });
     },
     async sendReminder(email, r) {
@@ -288,7 +288,7 @@ export function createMailer(config: MailerConfig): Mailer {
         to: email,
         subject: `24pray — deine Gebetsstunde beginnt bald (${r.projectTitle})`,
         text: `${r.name ? r.name + ', ' : ''}deine Stunde in „${r.projectTitle}" beginnt ${when} (${r.timezone}).${cal.text}`,
-        html: `<p>${r.name ? r.name + ', ' : ''}deine Stunde in „<strong>${r.projectTitle}</strong>" beginnt <strong>${when}</strong> (${r.timezone}).</p>${cal.html}`,
+        html: `<p>${r.name ? escapeHtml(r.name) + ', ' : ''}deine Stunde in „<strong>${escapeHtml(r.projectTitle)}</strong>" beginnt <strong>${escapeHtml(when)}</strong> (${escapeHtml(r.timezone)}).</p>${cal.html}`,
       });
     },
     async sendBookingConfirmation(email, b) {
@@ -297,7 +297,7 @@ export function createMailer(config: MailerConfig): Mailer {
       const invite = b.projectUrl
         ? {
             text: `\n\nLade jemanden ein, die Stunde neben dir zu übernehmen: ${b.projectUrl}`,
-            html: `<p>Lade jemanden ein, die Stunde neben dir zu übernehmen: <a href="${b.projectUrl}">${b.projectUrl}</a></p>`,
+            html: `<p>Lade jemanden ein, die Stunde neben dir zu übernehmen: <a href="${escapeHtml(b.projectUrl)}">${escapeHtml(b.projectUrl)}</a></p>`,
           }
         : { text: '', html: '' };
       await transport.sendMail({
@@ -305,7 +305,7 @@ export function createMailer(config: MailerConfig): Mailer {
         to: email,
         subject: `24pray — deine Gebetsstunde ist eingetragen (${b.projectTitle})`,
         text: `${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „${b.projectTitle}" ist eingetragen: ${when} (${b.timezone}).${cal.text}${invite.text}`,
-        html: `<p>${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „<strong>${b.projectTitle}</strong>" ist eingetragen: <strong>${when}</strong> (${b.timezone}).</p>${cal.html}${invite.html}`,
+        html: `<p>${b.name ? escapeHtml(b.name) + ', ' : ''}danke! Deine Stunde in „<strong>${escapeHtml(b.projectTitle)}</strong>" ist eingetragen: <strong>${escapeHtml(when)}</strong> (${escapeHtml(b.timezone)}).</p>${cal.html}${invite.html}`,
       });
     },
     async sendBookingNotice(email, n) {
@@ -315,7 +315,7 @@ export function createMailer(config: MailerConfig): Mailer {
         to: email,
         subject: `24pray — neue Stunde in deiner Gebetswache (${n.projectTitle})`,
         text: `${n.bookerName} hat eine Stunde in „${n.projectTitle}" übernommen: ${when} (${n.timezone}).`,
-        html: `<p><strong>${n.bookerName}</strong> hat eine Stunde in „<strong>${n.projectTitle}</strong>" übernommen: <strong>${when}</strong> (${n.timezone}).</p>`,
+        html: `<p><strong>${escapeHtml(n.bookerName)}</strong> hat eine Stunde in „<strong>${escapeHtml(n.projectTitle)}</strong>" übernommen: <strong>${escapeHtml(when)}</strong> (${escapeHtml(n.timezone)}).</p>`,
       });
     },
     async sendScheduleChange(email, c) {
@@ -326,13 +326,13 @@ export function createMailer(config: MailerConfig): Mailer {
         newWhen: formatReminderTime({ startTime: s.newStartTime, timezone: c.timezone }),
       }));
       const hoursText = rows.map((r) => `  ${r.oldWhen} → ${r.newWhen}`).join('\n');
-      const hoursHtml = rows.map((r) => `<li>${r.oldWhen} → <strong>${r.newWhen}</strong></li>`).join('');
+      const hoursHtml = rows.map((r) => `<li>${escapeHtml(r.oldWhen)} → <strong>${escapeHtml(r.newWhen)}</strong></li>`).join('');
       await transport.sendMail({
         from: config.from,
         to: email,
         subject: `24pray — Zeitplan geändert (${c.projectTitle})`,
         text: `${c.name ? c.name + ', ' : ''}die Gebetswache „${c.projectTitle}" wurde verschoben: ${oldWhen} → ${newWhen} (${c.timezone}).\n\nDeine Stunden:\n${hoursText}\n\nPasst es nicht mehr? Gib deine Stunde in der Gebetswache frei: ${c.projectUrl}`,
-        html: `<p>${c.name ? c.name + ', ' : ''}die Gebetswache „<strong>${c.projectTitle}</strong>" wurde verschoben: ${oldWhen} → <strong>${newWhen}</strong> (${c.timezone}).</p><p>Deine Stunden:</p><ul>${hoursHtml}</ul><p>Passt es nicht mehr? <a href="${c.projectUrl}">Gib deine Stunde in der Gebetswache frei</a>.</p>`,
+        html: `<p>${c.name ? escapeHtml(c.name) + ', ' : ''}die Gebetswache „<strong>${escapeHtml(c.projectTitle)}</strong>" wurde verschoben: ${escapeHtml(oldWhen)} → <strong>${escapeHtml(newWhen)}</strong> (${escapeHtml(c.timezone)}).</p><p>Deine Stunden:</p><ul>${hoursHtml}</ul><p>Passt es nicht mehr? <a href="${escapeHtml(c.projectUrl)}">Gib deine Stunde in der Gebetswache frei</a>.</p>`,
       });
     },
     async sendProjectFarewell(email, f) {
@@ -343,7 +343,7 @@ export function createMailer(config: MailerConfig): Mailer {
         to: email,
         subject: `24pray — Gebetswache beendet (${f.projectTitle})`,
         text: `Die Gebetswache „${f.projectTitle}" wurde beendet. Deine Stunde${plural ? `n am ${list} finden` : ` am ${list} findet`} nicht mehr statt. Danke fürs Mitwachen.`,
-        html: `<p>Die Gebetswache „<strong>${f.projectTitle}</strong>" wurde beendet. Deine Stunde${plural ? `n am <strong>${list}</strong> finden` : ` am <strong>${list}</strong> findet`} nicht mehr statt. Danke fürs Mitwachen.</p>`,
+        html: `<p>Die Gebetswache „<strong>${escapeHtml(f.projectTitle)}</strong>" wurde beendet. Deine Stunde${plural ? `n am <strong>${escapeHtml(list)}</strong> finden` : ` am <strong>${escapeHtml(list)}</strong> findet`} nicht mehr statt. Danke fürs Mitwachen.</p>`,
       });
     },
     async sendUpdateNotice(email, n) {
@@ -355,8 +355,8 @@ export function createMailer(config: MailerConfig): Mailer {
         text: `${tr.posted(n.authorName)}\n\n${n.text}\n\n${tr.toWatch}: ${n.projectUrl}\n\n${tr.unsubscribe}: ${n.unsubscribeUrl}`,
         html: `<div dir="${tr.dir}"><p>${tr.posted(escapeHtml(n.authorName))}</p>` +
           `<blockquote style="margin:0;padding-inline-start:12px;border-inline-start:3px solid #ccc;white-space:pre-wrap">${escapeHtml(n.text)}</blockquote>` +
-          `<p><a href="${n.projectUrl}">${tr.toWatch}</a></p>` +
-          `<p style="font-size:12px;color:#888"><a href="${n.unsubscribeUrl}">${tr.unsubscribe}</a></p></div>`,
+          `<p><a href="${escapeHtml(n.projectUrl)}">${tr.toWatch}</a></p>` +
+          `<p style="font-size:12px;color:#888"><a href="${escapeHtml(n.unsubscribeUrl)}">${tr.unsubscribe}</a></p></div>`,
       });
     },
     async sendFeedback(to, f) {
