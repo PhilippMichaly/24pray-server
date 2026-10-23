@@ -234,10 +234,21 @@ curl -s -X POST http://$IP/api/auth/magic-link \
 ```bash
 $SSH 'cat > /etc/cron.daily/24pray-backup <<'"'"'EOF'"'"'
 #!/bin/sh
-d=$(date +%F)
+set -eu
 umask 077
-sqlite3 /opt/24pray/data/24pray.db ".backup '"'"'/opt/24pray/backup/24pray-$d.db'"'"'"
-find /opt/24pray/backup -name "24pray-*.db" -mtime +14 -delete
+src=/opt/24pray/data/24pray.db
+dir=/opt/24pray/backup
+d=$(date +%F)
+t="$dir/.24pray-$d.tmp"
+trap 'rm -f "$t" "$t-wal" "$t-shm"' EXIT
+test -s "$src"
+rm -f "$t"
+sqlite3 "$src" ".backup \"$t\""
+sqlite3 "$t" "PRAGMA journal_mode=DELETE" >/dev/null
+test "$(sqlite3 -readonly "$t" "PRAGMA quick_check")" = ok
+test "$(sqlite3 -readonly "$t" "SELECT count(*) FROM sqlite_master WHERE name = 'PrayerProject'")" = 1
+mv "$t" "$dir/24pray-$d.db"
+find "$dir" -name "24pray-*.db" -mtime +14 -delete
 EOF
 chmod +x /etc/cron.daily/24pray-backup
 chmod 700 /opt/24pray/backup'
@@ -245,7 +256,9 @@ chmod 700 /opt/24pray/backup'
 
 `sqlite3 .backup` liefert einen konsistenten Snapshot auch bei laufendem Schreibbetrieb
 (ein `cp` kann bei WAL eine inkonsistente Datei ergeben); `umask 077` und das
-Verzeichnis `0700` halten die Backups privat. Voraussetzung: `sqlite3` ist installiert.
+Verzeichnis `0700` halten die Backups privat. Das Skript bricht bei jedem Fehler ab (`set -eu`), sichert erst in eine Temp-Datei
+(`.24pray-<datum>.tmp`), prueft sie (`quick_check`, Tabelle `PrayerProject`) und benennt sie
+erst dann um; die Rotation laeuft nur nach Erfolg. Voraussetzung: `sqlite3` ist installiert.
 Der Off-site-Pull (rrsync als root) liest weiterhin `24pray-*.db` aus `/opt/24pray/backup`.
 
 Restore: Dienst stoppen → Backup-Datei nach `/opt/24pray/data/24pray.db`
