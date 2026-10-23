@@ -29,7 +29,9 @@ function icsAllDayDate(d: Date, tz: string): string {
 }
 
 function escapeIcs(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  return s
+    .replace(/\r\n?/g, '\n')
+    .replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
 }
 
 export function buildIcs(ev: CalendarEvent): string {

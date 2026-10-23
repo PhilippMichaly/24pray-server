@@ -74,3 +74,18 @@ describe('calendar — Tages-Slot (allDay, slotDurationMinutes=1440)', () => {
     expect(ics).toContain('DTSTART;VALUE=DATE:20260714');
   });
 });
+
+describe('calendar — Zeilenumbrüche im Titel (ICS-Injection)', () => {
+  it('ein CR/CRLF im Titel erzeugt keine eigene ICS-Zeile und kein rohes \\r', () => {
+    const ics = buildIcs({
+      uid: 'slot-cr',
+      title: 'A\r\nURL:https://evil\rB',
+      startTime: new Date('2026-07-14T02:00:00.000Z'),
+      endTime: new Date('2026-07-14T03:00:00.000Z'),
+      url: 'https://24pray.org/projects/p1',
+    });
+    const lines = ics.split('\r\n');
+    expect(lines.some((l) => l.startsWith('URL:https://evil'))).toBe(false);
+    expect(ics).not.toMatch(/\r(?!\n)/);
+  });
+});
