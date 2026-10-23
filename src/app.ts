@@ -72,8 +72,11 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
       console.error('[api]', req.method, req.url, err);
       return reply.code(status).send({ message: 'Serverfehler' });
     }
-    // Fastify 5 typisiert den Fehler als unknown (geworfen werden kann alles) — Message nur von Error-Objekten.
-    const message = err instanceof Error ? err.message : undefined;
+    // Fastify 5 typisiert den Fehler als unknown (geworfen werden kann alles) — Message nur, wenn
+    // sie ein String ist. Auch Nicht-Error-Objekte zählen: @fastify/rate-limit wirft den Rückgabewert
+    // des errorResponseBuilder ({ statusCode: 429, message }) als Plain Object.
+    const raw = typeof err === 'object' && err !== null ? (err as { message?: unknown }).message : undefined;
+    const message = typeof raw === 'string' ? raw : undefined;
     return reply.code(status).send({ message: message ?? 'Serverfehler' });
   });
 
