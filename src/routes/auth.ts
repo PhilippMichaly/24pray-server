@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import type { Mailer } from '../lib/mailer.js';
 import type { Env } from '../env.js';
-import { generateToken, generateLoginCode, hashToken } from '../lib/tokens.js';
+import { generateToken, generateLoginCode, hashToken, safeEqual } from '../lib/tokens.js';
 import { MagicLinkBody, VerifyBody, VerifyCodeBody, SESSION_COOKIE } from '../schemas/auth.js';
 import { requireUser } from '../plugins/auth.js';
 import { notifyAdmin } from '../lib/adminNotify.js';
@@ -144,7 +144,7 @@ export function authRoutes(app: FastifyInstance, deps: { prisma: PrismaClient; m
         AND (SELECT COALESCE(SUM(codeAttempts), 0) FROM MagicToken
              WHERE userId = ${user.id} AND expiresAt > ${Date.now()}) < ${MAX_CODE_ATTEMPTS}`;
     if (reserved === 0) return fail();
-    if (record.code !== hashToken(code)) return fail();
+    if (!record.code || !safeEqual(record.code, hashToken(code))) return fail();
     // Zähler bleibt stehen (Token wird ohnehin konsumiert und zählt bis zum Ablauf weiter mit).
     await prisma.magicToken.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
     return createSession(reply, record.userId, record.locale);
