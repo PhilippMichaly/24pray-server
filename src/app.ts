@@ -72,7 +72,9 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
       console.error('[api]', req.method, req.url, err);
       return reply.code(status).send({ message: 'Serverfehler' });
     }
-    return reply.code(status).send({ message: err.message ?? 'Serverfehler' });
+    // Fastify 5 typisiert den Fehler als unknown (geworfen werden kann alles) — Message nur von Error-Objekten.
+    const message = err instanceof Error ? err.message : undefined;
+    return reply.code(status).send({ message: message ?? 'Serverfehler' });
   });
 
   registerAuth(app, prisma);
