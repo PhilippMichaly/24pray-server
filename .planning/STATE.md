@@ -1,6 +1,13 @@
 ---
-gsd_state_version: '1.0'
+gsd_state_version: "1.0"
+current_phase: 1
+current_phase_name: Erstellen mit freiem Endzeitpunkt
 status: planning
+stopped_at: Phase 1 context gathered
+last_updated: "2026-10-26T14:15:15.785Z"
+last_activity: 2026-10-26
+last_activity_desc: Roadmap erstellt, 6/6 v1-Anforderungen auf 2 Phasen abgebildet
+state_head: cf22aae8aec8e895a2cadc918df65444107a6946
 progress:
   total_phases: 2
   completed_phases: 0
@@ -74,6 +81,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-26
-Stopped at: Roadmap erstellt und zur Prüfung vorgelegt
-Resume file: None
+Last session: 2026-10-26T14:15:15.767Z
+Stopped at: Phase 1 context gathered
+Resume file: .planning/phases/01-erstellen-mit-freiem-endzeitpunkt/01-CONTEXT.md
