@@ -26,10 +26,10 @@ Organisatoren können die Gesamtdauer ihrer Gebetswache exakt an ihren tatsächl
 - [ ] Ein eigenes Ende nach dem Start und innerhalb der bestehenden Maximaldauer wird mit verständlicher Validierung sichergestellt
 - [ ] Beim Bearbeiten wird ein neues Ende abgelehnt, wenn dadurch bereits gebuchte Slots außerhalb des Zeitraums lägen
 - [ ] Die bisherigen Dauer-Vorschläge bleiben als schnelle Auswahl erhalten
-- [ ] Zusammenfassung und Anzeige verwenden den tatsächlich gewählten Endzeitpunkt beziehungsweise die tatsächliche Dauer
 
 ### Out of Scope
 
+- Erweiterte Zusammenfassung eigener Endzeitpunkte — auf v2 verschoben; v1 konzentriert sich auf Auswahl, Bearbeitung und Validierung
 - Änderungen an API-Endpunkten oder API-Verhalten — der gewünschte Scope ist ausschließlich die Web-Oberfläche; die vorhandenen API-Fähigkeiten werden genutzt
 - Frei definierbare Längen einzelner Gebets-Slots — das Feature betrifft nur die Gesamtdauer der Gebetswache
 - Automatisches Runden beliebiger Endzeiten — ungültige Endzeiten werden stattdessen erklärt und abgelehnt
