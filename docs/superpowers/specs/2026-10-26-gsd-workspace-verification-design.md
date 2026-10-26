@@ -23,7 +23,7 @@ Dies entspricht dem vorhandenen GSD-Multi-Repo-Modell. Die Alternativen — Plan
 2. `/home/pmi/24pray-api` nach `/home/pmi/24pray/api` verschieben.
 3. `/home/pmi/24pray-web` nach `/home/pmi/24pray/web` verschieben.
 4. `.planning` aus dem API-Repository in das Workspace-Root verschieben.
-5. In `.planning/config.json` `sub_repos: ["api", "web"]` setzen. Bestehende Konfiguration und uncommittete Dateien bleiben erhalten.
+5. In `.planning/config.json` `sub_repos: ["api", "web"]` setzen und `commit_docs: false` für das nicht versionierte Workspace-Root verwenden. Bestehende übrige Konfiguration und uncommittete Dateien bleiben erhalten; künftige Planungsartefakte bleiben lokal, Code-Commits erfolgen getrennt in `api` und `web`.
 6. Kompatibilitätslinks `/home/pmi/24pray-api -> /home/pmi/24pray/api` und `/home/pmi/24pray-web -> /home/pmi/24pray/web` einrichten, damit das vorhandene Deployment-Runbook und lokale Verweise weiter funktionieren.
 
 Es werden keine Produktionsdaten, Datenbanken oder Serverkonfigurationen verändert. Git-Historie und Working-Tree-Zustand bleiben durch Verschieben statt Neuinitialisieren erhalten.
