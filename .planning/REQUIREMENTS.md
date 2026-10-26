@@ -9,9 +9,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Erstellen
 
-- [ ] **CREATE-01**: Organisatoren können beim Erstellen einer Gebetswache zusätzlich zu den Dauer-Vorschlägen ein eigenes Enddatum mit Uhrzeit auswählen
-- [ ] **CREATE-02**: Organisatoren können weiterhin einen der bisherigen Dauer-Vorschläge für Stunden- oder Tages-Wachen auswählen
-- [ ] **CREATE-03**: Beim Erstellen mit eigenem Endzeitpunkt wird sichergestellt, dass das Ende nach dem Start liegt, die Gesamtdauer höchstens 366 Tage beträgt und der Zeitraum ausschließlich vollständige Slots enthält; ungültige Eingaben erhalten eine verständliche Fehlermeldung
+- [x] **CREATE-01**: Organisatoren können beim Erstellen einer Gebetswache zusätzlich zu den Dauer-Vorschlägen ein eigenes Enddatum mit Uhrzeit auswählen
+- [x] **CREATE-02**: Organisatoren können weiterhin einen der bisherigen Dauer-Vorschläge für Stunden- oder Tages-Wachen auswählen
+- [x] **CREATE-03**: Beim Erstellen mit eigenem Endzeitpunkt wird sichergestellt, dass das Ende nach dem Start liegt, die Gesamtdauer höchstens 366 Tage beträgt und der Zeitraum ausschließlich vollständige Slots enthält; ungültige Eingaben erhalten eine verständliche Fehlermeldung
 
 ### Bearbeiten
 
@@ -45,9 +45,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CREATE-01 | Phase 1 | Pending |
-| CREATE-02 | Phase 1 | Pending |
-| CREATE-03 | Phase 1 | Pending |
+| CREATE-01 | Phase 1 | Complete |
+| CREATE-02 | Phase 1 | Complete |
+| CREATE-03 | Phase 1 | Complete |
 | EDIT-01 | Phase 2 | Pending |
 | EDIT-02 | Phase 2 | Pending |
 | EDIT-03 | Phase 2 | Pending |

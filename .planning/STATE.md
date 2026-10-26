@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: Erstellen mit freiem Endzeitpunkt
-status: executing
-stopped_at: Phase 1 context gathered
-last_updated: "2026-10-26T14:54:44.650Z"
+status: verifying
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-10-26T15:58:47.849Z"
 last_activity: 2026-10-26
-last_activity_desc: Roadmap erstellt, 6/6 v1-Anforderungen auf 2 Phasen abgebildet
-state_head: 2765ffa7a6aa440260e6496fb83839a668ff04e1
+last_activity_desc: Phase 01 execution started
+state_head: 7e2e67f379dcf81d893f65f62caed7ec11b6f66f
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 1
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-26)
 
 **Core value:** Organisatoren können die Gesamtdauer ihrer Gebetswache exakt an ihren tatsächlichen Gebetszeitraum anpassen, ohne unvollständige Slots oder bestehende Buchungen zu gefährden.
-**Current focus:** Phase 1 — Erstellen mit freiem Endzeitpunkt
+**Current focus:** Phase 01 — Erstellen mit freiem Endzeitpunkt
 
 ## Current Position
 
-Phase: 01 (Erstellen mit freiem Endzeitpunkt) — READY TO EXECUTE
-Plan: 0 of TBD in current phase
-Status: Ready to execute
-Last activity: 2026-10-26 — Roadmap erstellt, 6/6 v1-Anforderungen auf 2 Phasen abgebildet
+Phase: 01 (Erstellen mit freiem Endzeitpunkt) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
+Last activity: 2026-10-26 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -52,6 +52,11 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 12 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -62,6 +67,8 @@ Recent decisions affecting current work:
 
 - [Milestone v1]: Scope ausschließlich 24pray-web — die API unterstützt freie Start-/Endzeitpunkte bereits
 - [Milestone v1]: Ungültige Endzeiten ablehnen statt runden; gebuchte Slots beim Verkürzen schützen
+- [Phase 01]: Custom-End: Summenzeile im Custom-Modus ausgeblendet (kleinste nicht-veraltete Variante, Pitfall 3) — Veraltete Preset-Stunden im Custom-Modus sind verboten; Ausblenden vermeidet einen sechsten i18n-Key und RTL/Bidi-Risiken
+- [Phase 01]: Cross-Repo-Commits: Produktionscode in 24pray-web, Planungsmetadaten nur in 24pray-api — Vom Auftrag explizit angeordnete Arbeitsverteilung; Evaluation-Scope des API-Repos kann Web-Commits nicht sehen, deshalb Hashes im SUMMARY dokumentiert
 
 ### Pending Todos
 
@@ -81,6 +88,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-26T14:15:15.767Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-erstellen-mit-freiem-endzeitpunkt/01-CONTEXT.md
+Last session: 2026-10-26T15:58:47.827Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
