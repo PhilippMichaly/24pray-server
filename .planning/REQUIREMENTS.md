@@ -45,17 +45,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CREATE-01 | — | Pending |
-| CREATE-02 | — | Pending |
-| CREATE-03 | — | Pending |
-| EDIT-01 | — | Pending |
-| EDIT-02 | — | Pending |
-| EDIT-03 | — | Pending |
+| CREATE-01 | Phase 1 | Pending |
+| CREATE-02 | Phase 1 | Pending |
+| CREATE-03 | Phase 1 | Pending |
+| EDIT-01 | Phase 2 | Pending |
+| EDIT-02 | Phase 2 | Pending |
+| EDIT-03 | Phase 2 | Pending |
 
 **Coverage:**
 - v1 requirements: 6 total
-- Mapped to phases: 0
-- Unmapped: 6 — wird bei der Roadmap-Erstellung zugeordnet
+- Mapped to phases: 6
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-10-26*
