@@ -27,11 +27,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Organisator kann weiterhin mit einem Klick einen der bisherigen Stunden- oder Tages-Presets auswählen und die Wache wird wie bisher angelegt
   3. Eine mit eigenem Endzeitpunkt angelegte Wache besteht ausschließlich aus vollständigen Stunden- oder Tages-Slots ab dem Projektstart
   4. Ungültige eigene Enden (Ende vor/nicht nach Start, mehr als 366 Tage, kein vollständiger Slot) werden abgelehnt; der Organisator erhält eine verständliche Fehlermeldung in seiner Sprache
-**Plans**: TBD
+**Plans**: 1 plan
 **UI hint**: yes
 
 Plans:
-- [ ] 01-01: TBD (wird in plan-phase abgeleitet)
+- [ ] 01-01-PLAN.md — Custom-End-Erstellung im Dauer-Raster (Validierung, i18n, Payload) in 24pray-web; API unverändert
 
 ### Phase 2: Bearbeiten des Endzeitpunkts
 **Goal**: Organisatoren verlängern oder verkürzen das Ende bestehender Gebetswachen über die Web-Oberfläche, ohne unvollständige Slots oder bestehende Buchungen zu gefährden
@@ -56,5 +56,5 @@ Phases execute in numeric order: 1 → 2
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Erstellen mit freiem Endzeitpunkt | 0/TBD | Not started | - |
+| 1. Erstellen mit freiem Endzeitpunkt | 0/1 | Not started | - |
 | 2. Bearbeiten des Endzeitpunkts | 0/TBD | Not started | - |
