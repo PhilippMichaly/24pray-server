@@ -955,4 +955,101 @@ describe('EDIT — PATCH endDate: Buchungsschutz und Ausrichtung', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().endDate).toBe(future(6));
   });
+
+  it('409 trägt code END_CUTS_BOOKING, earliestEnd und message', async () => {
+    const { patch } = await setupBooked('code');
+    const res = await patch({ endDate: future(5) });
+    expect(res.statusCode).toBe(409);
+    const body = res.json();
+    expect(body.code).toBe('END_CUTS_BOOKING');
+    expect(body.earliestEnd).toBe(future(6));
+    expect(typeof body.message).toBe('string');
+    expect(body.message.length).toBeGreaterThan(0);
+  });
+
+  it('COMPLETED hinter dem neuen Ende blockiert (409), CANCELLED nicht (200)', async () => {
+    const { orga, pid, slotId, patch } = await setupBooked('status');
+    await db.prisma.prayerSlot.update({ where: { id: slotId }, data: { status: 'COMPLETED' } });
+    const completed = await patch({ endDate: future(5) });
+    expect(completed.statusCode).toBe(409);
+    expect(completed.json().code).toBe('END_CUTS_BOOKING');
+
+    // Zweite Buchung später im Raster stornieren: CANCELLED darf das Verkürzen nicht blockieren.
+    const late = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: orga },
+      payload: { startTime: future(8) },
+    });
+    expect(late.statusCode).toBe(200);
+    const del = await app.inject({ method: 'DELETE', url: `/slots/${late.json().id}`, cookies: { session: orga } });
+    expect(del.statusCode).toBeLessThan(300);
+    expect((await patch({ endDate: future(7) })).statusCode).toBe(200);
+  });
+
+  it('Fremde:r erhält 403 ohne code und ohne earliestEnd (kein Buchungs-Orakel)', async () => {
+    const { patch } = await setupBooked('oracle');
+    const mallory = await loginAs('edit-oracle-mallory@example.com');
+    const res = await patch({ endDate: future(5) }, mallory);
+    expect(res.statusCode).toBe(403);
+    const body = res.json();
+    expect(body.code).toBeUndefined();
+    expect(body.earliestEnd).toBeUndefined();
+  });
+
+  it('nicht ausgerichtetes Ende → 400 END_NOT_ALIGNED mit exampleEnd (Stunden- und Tages-Wache)', async () => {
+    const { patch } = await setupBooked('align');
+    const half = new Date(Date.parse(future(12)) + 30 * 60_000).toISOString();
+    const res = await patch({ endDate: half });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe('END_NOT_ALIGNED');
+    expect(res.json().exampleEnd).toBe(future(13));
+    expect(res.json().message).toBe('Das Ende muss eine ganze Zahl von Zeitfenstern nach dem Start liegen');
+
+    const orga = await loginAs('edit-align-days@example.com');
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'edit-days', startDate: future(24), endDate: future(96), slotDurationMinutes: 1440 },
+    });
+    expect(create.statusCode).toBe(200);
+    const did = create.json().id as string;
+    const patchDays = (endDate: string) =>
+      app.inject({ method: 'PATCH', url: `/projects/${did}`, cookies: { session: orga }, payload: { endDate } });
+    const day36 = await patchDays(future(24 + 36));
+    expect(day36.statusCode).toBe(400);
+    expect(day36.json().code).toBe('END_NOT_ALIGNED');
+    expect(day36.json().exampleEnd).toBe(future(24 + 48));
+    expect((await patchDays(future(24 + 48))).statusCode).toBe(200);
+  });
+
+  it('Spannen-Verstöße tragen END_NOT_AFTER_START / SPAN_TOO_LONG mit unveränderten Texten', async () => {
+    const { patch } = await setupBooked('span');
+    const before = await patch({ endDate: future(1) });
+    expect(before.statusCode).toBe(400);
+    expect(before.json()).toEqual({ code: 'END_NOT_AFTER_START', message: 'endDate muss nach startDate liegen' });
+    const tooLong = await patch({ endDate: new Date(Date.parse(future(1)) + 367 * DAY).toISOString() });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json()).toEqual({ code: 'SPAN_TOO_LONG', message: 'Eine Gebetswache darf höchstens 366 Tage dauern' });
+  });
+
+  it('D-02: POST und Fehler ohne endDate-Pfad bleiben unverändert (nur { message })', async () => {
+    const orga = await loginAs('edit-d02@example.com');
+    const ninety = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'edit-d02', startDate: future(1), endDate: new Date(Date.parse(future(1)) + 90 * 60_000).toISOString() },
+    });
+    expect(ninety.statusCode).toBe(200);
+
+    const backwards = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: 'edit-d02b', startDate: future(5), endDate: future(2) },
+    });
+    expect(backwards.statusCode).toBe(400);
+    expect(Object.keys(backwards.json())).toEqual(['message']);
+
+    const zod = await app.inject({
+      method: 'PATCH', url: `/projects/${ninety.json().id}`, cookies: { session: orga },
+      payload: { title: 'x'.repeat(121) },
+    });
+    expect(zod.statusCode).toBe(400);
+    expect(Object.keys(zod.json())).toEqual(['message']);
+  });
 });
