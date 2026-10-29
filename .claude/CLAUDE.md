@@ -10,7 +10,7 @@
 
 ### Constraints
 
-- **Scope**: Nur `24pray-web` — die API besitzt die benötigten Datumsfelder und Basisvalidierungen bereits
+- **Scope**: Primär `24pray-web`; einzige API-Ausnahme (Phase 2, D-02): Buchungsschutz-Guard und Slot-Ausrichtungsprüfung für `endDate` in `PATCH /projects/:id` — sonst bleibt das API-Verhalten unverändert
 - **Slot-Modell**: 60 oder 1440 Minuten — freie Endzeiten müssen vollständige Slots ab dem Start ergeben
 - **Projektdauer**: Höchstens 366 Tage — bestehende API-Grenze bleibt unverändert
 - **Buchungen**: Kein gebuchter Slot darf durch ein neues Projektende abgeschnitten werden — Buchungen und deren Historie bleiben geschützt
