@@ -898,3 +898,61 @@ describe('Anlage drosseln und Liste begrenzen (A5)', () => {
     expect(times).toEqual([...times].sort((a, b) => b - a));
   });
 });
+
+describe('EDIT — PATCH endDate: Buchungsschutz und Ausrichtung', () => {
+  // Projekt future(1)..future(10) (9 Stunden-Slots) mit einer Buchung auf future(5)..future(6).
+  async function setupBooked(tag: string) {
+    const orga = await loginAs(`edit-${tag}@example.com`);
+    const create = await app.inject({
+      method: 'POST', url: '/projects', cookies: { session: orga },
+      payload: { title: `edit-${tag}`, startDate: future(1), endDate: future(10), visibility: 'PUBLIC' },
+    });
+    expect(create.statusCode).toBe(200);
+    const pid = create.json().id as string;
+    const book = await app.inject({
+      method: 'POST', url: `/projects/${pid}/slots`, cookies: { session: orga },
+      payload: { startTime: future(5) },
+    });
+    expect(book.statusCode).toBe(200);
+    const patch = (payload: object, session = orga) =>
+      app.inject({ method: 'PATCH', url: `/projects/${pid}`, cookies: { session }, payload });
+    return { orga, pid, slotId: book.json().id as string, patch };
+  }
+
+  it('Verlängern lässt Buchungen unverändert und verschickt keine Mail', async () => {
+    const { pid, slotId, patch } = await setupBooked('extend');
+    const before = await db.prisma.prayerSlot.findUnique({ where: { id: slotId } });
+    const mailsBefore = { schedule: scheduleChanges.length, farewell: farewells.length };
+
+    const res = await patch({ endDate: future(20) });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().totalSlots).toBe(19);
+
+    const after = await db.prisma.prayerSlot.findUnique({ where: { id: slotId } });
+    expect(after!.startTime.getTime()).toBe(before!.startTime.getTime());
+    expect(after!.endTime.getTime()).toBe(before!.endTime.getTime());
+    expect(after!.status).toBe('BOOKED');
+
+    const grid = await app.inject({ method: 'GET', url: `/projects/${pid}/slots` });
+    expect(grid.statusCode).toBe(200);
+    expect(grid.json()).toHaveLength(19);
+
+    expect(scheduleChanges.length).toBe(mailsBefore.schedule);
+    expect(farewells.length).toBe(mailsBefore.farewell);
+  });
+
+  it('Verkürzen über eine Buchung wird abgelehnt und rollt zurück', async () => {
+    const { pid, patch } = await setupBooked('cut');
+    const res = await patch({ endDate: future(5) });
+    expect(res.statusCode).toBe(409);
+    const row = await db.prisma.prayerProject.findUnique({ where: { id: pid } });
+    expect(row!.endDate.toISOString()).toBe(future(10));
+  });
+
+  it('Verkürzen bis genau zum Slot-Ende ist erlaubt', async () => {
+    const { patch } = await setupBooked('exact');
+    const res = await patch({ endDate: future(6) });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().endDate).toBe(future(6));
+  });
+});

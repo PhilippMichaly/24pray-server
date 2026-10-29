@@ -13,9 +13,12 @@ import type { Env } from '../env.js';
 export const MAX_PROJECTS_PER_DAY = 10;
 export const PROJECT_LIST_LIMIT = 100;
 
-function httpError(status: number, message: string) {
-  const e = new Error(message) as Error & { statusCode?: number };
+/** D-03: `responseExtra` sind bewusst markierte Zusatzfelder (z. B. `code`, `earliestEnd`), die der
+ *  Error-Handler in app.ts bei Status < 500 in den Body übernimmt — nie interne Details. */
+function httpError(status: number, message: string, responseExtra?: Record<string, unknown>) {
+  const e = new Error(message) as Error & { statusCode?: number; responseExtra?: Record<string, unknown> };
   e.statusCode = status;
+  if (responseExtra) e.responseExtra = responseExtra;
   return e;
 }
 
@@ -158,26 +161,50 @@ export function projectRoutes(
         body.endDate ? new Date(body.endDate) : existing.endDate,
       );
     }
-    const updated = await prisma.prayerProject.update({
-      where: { id },
-      data: {
-        ...(body.title !== undefined ? { title: body.title } : {}),
-        ...(body.description !== undefined ? { description: body.description } : {}),
-        ...(body.status !== undefined ? { status: body.status } : {}),
-        ...(body.visibility !== undefined ? { visibility: body.visibility } : {}),
-        ...(body.maskNames !== undefined ? { maskNames: body.maskNames } : {}),
-        ...(body.notifyOnBooking !== undefined ? { notifyOnBooking: body.notifyOnBooking } : {}),
-        ...(body.linkWhatsapp !== undefined ? { linkWhatsapp: body.linkWhatsapp } : {}),
-        ...(body.linkTelegram !== undefined ? { linkTelegram: body.linkTelegram } : {}),
-        ...(body.linkSignal !== undefined ? { linkSignal: body.linkSignal } : {}),
-        ...(body.startDate !== undefined ? { startDate: new Date(body.startDate) } : {}),
-        ...(body.endDate !== undefined ? { endDate: new Date(body.endDate) } : {}),
-        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
-        ...(body.locationName !== undefined ? { locationName: body.locationName } : {}),
-        ...(body.locationLat !== undefined ? { locationLat: body.locationLat } : {}),
-        ...(body.locationLon !== undefined ? { locationLon: body.locationLon } : {}),
-      },
-      include: { organizer: true },
+    // D-01: Die Client-Vorprüfung allein reicht nicht (veralteter Tab, Direktaufruf) — das Raster
+    // wird aus startDate..endDate dynamisch erzeugt, ein abgeschnittener gebuchter Slot wäre danach
+    // im Raster unsichtbar. Deshalb prüft der Server verbindlich, in DERSELBEN Transaktion wie das
+    // Update: ein Throw rollt zurück, das Projekt bleibt unverändert.
+    // D-03: Blockiert nur, was übernommen ist (BOOKED/COMPLETED) und hinter dem neuen Ende endet;
+    // CANCELLED zählt nicht. Ein neues Ende genau auf dem Slot-Ende ist erlaubt (endTime > newEnd).
+    // PD-07: Der Buchungspfad (slots.ts) liest project.endDate außerhalb dieser Transaktion — ein
+    // Restrennen Buchung ↔ Verkürzen im Millisekundenfenster ist akzeptiert (SQLite: ein Writer);
+    // ein Fix würde den Buchungspfad ändern und D-02 verletzen.
+    const updated = await prisma.$transaction(async (tx) => {
+      if (body.endDate !== undefined) {
+        const newEnd = new Date(body.endDate);
+        const cut = await tx.prayerSlot.aggregate({
+          where: { projectId: id, status: { in: ['BOOKED', 'COMPLETED'] }, endTime: { gt: newEnd } },
+          _max: { endTime: true },
+        });
+        if (cut._max.endTime) {
+          throw httpError(409, 'Das neue Ende würde übernommene Zeitfenster abschneiden', {
+            code: 'END_CUTS_BOOKING',
+            earliestEnd: cut._max.endTime.toISOString(),
+          });
+        }
+      }
+      return tx.prayerProject.update({
+        where: { id },
+        data: {
+          ...(body.title !== undefined ? { title: body.title } : {}),
+          ...(body.description !== undefined ? { description: body.description } : {}),
+          ...(body.status !== undefined ? { status: body.status } : {}),
+          ...(body.visibility !== undefined ? { visibility: body.visibility } : {}),
+          ...(body.maskNames !== undefined ? { maskNames: body.maskNames } : {}),
+          ...(body.notifyOnBooking !== undefined ? { notifyOnBooking: body.notifyOnBooking } : {}),
+          ...(body.linkWhatsapp !== undefined ? { linkWhatsapp: body.linkWhatsapp } : {}),
+          ...(body.linkTelegram !== undefined ? { linkTelegram: body.linkTelegram } : {}),
+          ...(body.linkSignal !== undefined ? { linkSignal: body.linkSignal } : {}),
+          ...(body.startDate !== undefined ? { startDate: new Date(body.startDate) } : {}),
+          ...(body.endDate !== undefined ? { endDate: new Date(body.endDate) } : {}),
+          ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
+          ...(body.locationName !== undefined ? { locationName: body.locationName } : {}),
+          ...(body.locationLat !== undefined ? { locationLat: body.locationLat } : {}),
+          ...(body.locationLon !== undefined ? { locationLon: body.locationLon } : {}),
+        },
+        include: { organizer: true },
+      });
     });
     return toProjectWithStats(prisma, updated, user.id);
   });

@@ -111,6 +111,16 @@ Info-Mail die Nutzer-Aktion nie verzögert oder kippt. Fail-closed ohne `ADMIN_N
 `src/lib/adminNotify.test.ts`). Die Mails enthalten Klartext-Namen und -Adressen — siehe
 Datenschutz-Hinweis im Web-Repo.
 
+### 10. Ende geändert (`PATCH /projects/:id` mit endDate, `src/routes/projects.ts:151`)
+
+| Rolle | Mail | Beweis | Push | Beweis |
+|---|---|---|---|---|
+| Gast-Teilnehmer (mit E-Mail, gebucht) | Nein — bewusst | Verlängern lässt jede Buchung unverändert; Verkürzen über eine Buchung wird mit 409 abgelehnt (D-03) — keine Buchung ändert sich. Beweis: `src/routes/projects.test.ts:922` „Verlängern lässt Buchungen unverändert und verschickt keine Mail" (Slot-Zeile identisch, `scheduleChanges`/`farewells` unverändert) | n/a | technisch unmöglich: kein Konto |
+| Gast-Teilnehmer (ohne E-Mail) | Nein — technisch unmöglich | Gast ohne E-Mail hat keinen Mail-Kanal | n/a | — |
+| Eingeloggter Teilnehmer (gebucht) | Nein — bewusst | gleiche Begründung wie oben: keine Buchung ändert sich (`src/routes/projects.test.ts:922`). Ein Hinweis auf neue freie Slots beim Verlängern ist eine zurückgestellte Idee (02-CONTEXT Deferred) | Nein — bewusst | dito — keine Buchung ändert sich |
+| Owner (Akteur) | Nein — bewusst | eigene Aktion, Ergebnis direkt in der UI sichtbar | Nein — bewusst | eigene Aktion |
+| Betreiber (`ADMIN_NOTIFY_TO`) | Nein — bewusst | kein Betreiber-Ereignis: weder neues Konto noch neue Wache noch Buchung | Nein — bewusst | kein Push-Kanal für den Betreiber |
+
 ## Offene Zellen (Merkposten)
 
 Ehrlich alles, was heute `Nein` OHNE gute Begründung ist. Nicht umgesetzt — nur gelistet:
