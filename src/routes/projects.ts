@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { generateToken } from '../lib/tokens.js';
 import { requireUser } from '../plugins/auth.js';
-import { assertProjectSpan, CreateProjectBody, ShiftProjectBody, UpdateProjectBody } from '../schemas/projects.js';
+import { assertEndDateChange, assertProjectSpan, CreateProjectBody, ShiftProjectBody, UpdateProjectBody } from '../schemas/projects.js';
 import { toProjectWithStats, toProjectListWithStats } from '../lib/projectView.js';
 import { canReadProject, ensureMembership } from '../lib/access.js';
 import { notifyAdmin } from '../lib/adminNotify.js';
@@ -155,11 +155,17 @@ export function projectRoutes(
     const existing = await prisma.prayerProject.findUnique({ where: { id } });
     if (!existing) throw httpError(404, 'Projekt nicht gefunden');
     if (existing.organizerId !== user.id) throw httpError(403, 'Nur der Organisator darf ändern');
-    if (body.startDate !== undefined || body.endDate !== undefined) {
-      assertProjectSpan(
+    // T-02-02: Alle Prüfungen mit Code/earliestEnd laufen erst nach 404/403 — kein Buchungs-Orakel.
+    if (body.endDate !== undefined) {
+      // D-04: beim Ändern des Endes gilt die Slot-Ausrichtung serverseitig; Codes nur auf diesem Pfad (PD-05).
+      assertEndDateChange(
         body.startDate ? new Date(body.startDate) : existing.startDate,
-        body.endDate ? new Date(body.endDate) : existing.endDate,
+        new Date(body.endDate),
+        existing.slotDurationMinutes,
       );
+    } else if (body.startDate !== undefined) {
+      // D-02: PATCH ohne endDate bleibt unverändert (Fehler-Body nur { message }).
+      assertProjectSpan(new Date(body.startDate), existing.endDate);
     }
     // D-01: Die Client-Vorprüfung allein reicht nicht (veralteter Tab, Direktaufruf) — das Raster
     // wird aus startDate..endDate dynamisch erzeugt, ein abgeschnittener gebuchter Slot wäre danach

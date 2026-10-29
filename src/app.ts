@@ -77,7 +77,14 @@ export async function buildApp(deps: BuildAppDeps): Promise<FastifyInstance> {
     // des errorResponseBuilder ({ statusCode: 429, message }) als Plain Object.
     const raw = typeof err === 'object' && err !== null ? (err as { message?: unknown }).message : undefined;
     const message = typeof raw === 'string' ? raw : undefined;
-    return reply.code(status).send({ message: message ?? 'Serverfehler' });
+    // D-03: Nur bewusst als `responseExtra` markierte Zusatzfelder (z. B. code/earliestEnd beim Ändern
+    // des Endes) gehen in den 4xx-Body — kein generisches Durchreichen von err.code (Fastify FST_ERR_*,
+    // Prisma P2002 bleiben intern). `message` steht zuletzt und kann nicht überschrieben werden.
+    const extraRaw = typeof err === 'object' && err !== null ? (err as { responseExtra?: unknown }).responseExtra : undefined;
+    const extra = typeof extraRaw === 'object' && extraRaw !== null && !Array.isArray(extraRaw)
+      ? (extraRaw as Record<string, unknown>)
+      : {};
+    return reply.code(status).send({ ...extra, message: message ?? 'Serverfehler' });
   });
 
   registerAuth(app, prisma);

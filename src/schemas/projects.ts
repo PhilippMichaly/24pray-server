@@ -17,14 +17,53 @@ export function isValidTimezone(tz: string): boolean {
   }
 }
 
-/** Wirft einen 400er (Error mit statusCode, vom Error-Handler in app.ts durchgereicht). */
-export function assertProjectSpan(start: Date, end: Date): void {
-  let message: string | null = null;
-  if (!(end.getTime() > start.getTime())) message = 'endDate muss nach startDate liegen';
-  else if (end.getTime() - start.getTime() > MAX_PROJECT_DAYS * 86_400_000) {
-    message = `Eine Gebetswache darf höchstens ${MAX_PROJECT_DAYS} Tage dauern`;
+/** Spannenprüfung als reine Funktion: Verstoß mit maschinenlesbarem Code, sonst null.
+ *  Die Texte sind die bisherigen API-Meldungen, wortgleich (D-02). */
+export function projectSpanViolation(
+  start: Date,
+  end: Date,
+): { code: 'END_NOT_AFTER_START' | 'SPAN_TOO_LONG'; message: string } | null {
+  if (!(end.getTime() > start.getTime())) {
+    return { code: 'END_NOT_AFTER_START', message: 'endDate muss nach startDate liegen' };
   }
-  if (message) throw Object.assign(new Error(message), { statusCode: 400 });
+  if (end.getTime() - start.getTime() > MAX_PROJECT_DAYS * 86_400_000) {
+    return { code: 'SPAN_TOO_LONG', message: `Eine Gebetswache darf höchstens ${MAX_PROJECT_DAYS} Tage dauern` };
+  }
+  return null;
+}
+
+/** Wirft einen 400er (Error mit statusCode, vom Error-Handler in app.ts durchgereicht).
+ *  D-02: POST und PATCH ohne endDate — bewusst OHNE Code-Felder, Antwort bleibt byte-identisch. */
+export function assertProjectSpan(start: Date, end: Date): void {
+  const violation = projectSpanViolation(start, end);
+  if (violation) throw Object.assign(new Error(violation.message), { statusCode: 400 });
+}
+
+/**
+ * Prüfung beim Ändern des Endes (PATCH mit endDate, D-04/PD-05): zuerst die Spanne, dann die
+ * Slot-Ausrichtung (Pitfall 5 — ein Ende vor dem Start soll „nicht nach Start“ melden, nicht
+ * „nicht ausgerichtet“). Verstöße tragen `responseExtra.code`; bei fehlender Ausrichtung zusätzlich
+ * `exampleEnd` = nächstes gültiges Ende. Reine ms-Arithmetik, damit keine Zeitumstellung stört.
+ */
+export function assertEndDateChange(start: Date, end: Date, slotDurationMinutes: number): void {
+  const violation = projectSpanViolation(start, end);
+  if (violation) {
+    throw Object.assign(new Error(violation.message), {
+      statusCode: 400,
+      responseExtra: { code: violation.code },
+    });
+  }
+  const slotMs = slotDurationMinutes * 60_000;
+  const span = end.getTime() - start.getTime();
+  if (span % slotMs !== 0) {
+    throw Object.assign(new Error('Das Ende muss eine ganze Zahl von Zeitfenstern nach dem Start liegen'), {
+      statusCode: 400,
+      responseExtra: {
+        code: 'END_NOT_ALIGNED',
+        exampleEnd: new Date(start.getTime() + Math.ceil(span / slotMs) * slotMs).toISOString(),
+      },
+    });
+  }
 }
 
 const Timezone = z.string().min(1).refine(isValidTimezone, 'Ungültige Zeitzone');
