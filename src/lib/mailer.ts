@@ -46,6 +46,7 @@ export interface ScheduleChangeMail {
   timezone: string;
   slots: ScheduleChangeSlotItem[];
   projectUrl: string; // zum Freigeben, falls die neue Zeit nicht mehr passt
+  isAllDay?: boolean; // Tages-Wache: Datum statt Uhrzeit, „Tage" statt „Stunden"
 }
 
 /** Wache gelöscht (Ersteller-Lebenszyklus): Abschieds-Mail an künftige Gebuchte. */
@@ -53,7 +54,8 @@ export interface ProjectFarewellMail {
   name: string;
   projectTitle: string;
   timezone: string;
-  slots: string[]; // ISO-Starts der betroffenen (nicht mehr stattfindenden) Stunden
+  slots: string[]; // ISO-Starts der betroffenen (nicht mehr stattfindenden) Stunden/Tage
+  isAllDay?: boolean; // Tages-Wache: Datum statt Uhrzeit, „Tage" statt „Stunden"
 }
 
 /** Owner-Update im „Neues"-Tab → Mail an alle Teilnehmer (Backlog 1). */
@@ -141,6 +143,24 @@ export interface Mailer {
   sendAdminNotice?(to: string, notice: AdminNotice): Promise<void>;
 }
 
+/**
+ * Stunden/Tage-Wording der (deutschen) Mails: Tages-Wachen (slotDurationMinutes=1440) haben
+ * keine „Stunden". Zentral, damit keine Mail die Einheit selbst rät.
+ */
+export function slotWords(isAllDay?: boolean) {
+  return isAllDay
+    ? {
+        prayer: 'Gebetstag', dein: 'dein Gebetstag', mine: 'Dein Tag', mineLower: 'dein Tag', minePlural: 'Deine Tage',
+        a: 'einen Tag', the: 'den Tag', neu: 'neuer Tag', first: 'ERSTER Tag', firstLine: 'Der erste Tag',
+        one: 'Tag', total: 'Übernommene Tage', release: 'Gib deinen Tag', begins: 'beginnt am',
+      }
+    : {
+        prayer: 'Gebetsstunde', dein: 'deine Gebetsstunde', mine: 'Deine Stunde', mineLower: 'deine Stunde', minePlural: 'Deine Stunden',
+        a: 'eine Stunde', the: 'die Stunde', neu: 'neue Stunde', first: 'ERSTE Stunde', firstLine: 'Die erste Stunde',
+        one: 'Stunde', total: 'Übernommene Stunden', release: 'Gib deine Stunde', begins: 'beginnt',
+      };
+}
+
 function formatReminderTime(r: { startTime: string; timezone: string; isAllDay?: boolean }): string {
   if (r.isAllDay) {
     // Tages-Wache: kein Uhrzeit-Punkt, sondern das Datum des Tages („Montag, 14. Juli").
@@ -209,16 +229,17 @@ function renderAdminNotice(n: AdminNotice): { subject: string; lines: string[] }
       };
     case 'slot_booked': {
       const when = formatAdminDate(n.startTime, n.timezone, n.isAllDay);
+      const w = slotWords(n.isAllDay);
       return {
         subject: n.isFirstBooking
-          ? `24pray — ERSTE Stunde übernommen: „${n.projectTitle}"`
-          : `24pray — Stunde übernommen: „${n.projectTitle}" (${n.bookedSlots}.)`,
+          ? `24pray — ${w.first} übernommen: „${n.projectTitle}"`
+          : `24pray — ${w.one} übernommen: „${n.projectTitle}" (${n.bookedSlots}.)`,
         lines: [
-          ...(n.isFirstBooking ? ['Die erste Stunde dieser Wache ist vergeben — die Kette lebt.'] : []),
+          ...(n.isFirstBooking ? [`${w.firstLine} dieser Wache ist vergeben — die Kette lebt.`] : []),
           `Wache: ${n.projectTitle}`,
           `Zeit: ${when} (${n.timezone})`,
           `Wer: ${n.bookerName}${n.bookerEmail ? ` <${n.bookerEmail}>` : ''}${n.isGuest ? ' (Gast)' : ' (Konto)'}`,
-          `Übernommene Stunden gesamt: ${n.bookedSlots}`,
+          `${w.total} gesamt: ${n.bookedSlots}`,
           `Link: ${n.projectUrl}`,
         ],
       };
@@ -283,67 +304,72 @@ export function createMailer(config: MailerConfig): Mailer {
     async sendReminder(email, r) {
       const when = formatReminderTime(r);
       const cal = calendarBlock(r.googleUrl, r.icsUrl);
+      const w = slotWords(r.isAllDay);
       await transport.sendMail({
         from: config.from,
         to: email,
-        subject: `24pray — deine Gebetsstunde beginnt bald (${r.projectTitle})`,
-        text: `${r.name ? r.name + ', ' : ''}deine Stunde in „${r.projectTitle}" beginnt ${when} (${r.timezone}).${cal.text}`,
-        html: `<p>${r.name ? escapeHtml(r.name) + ', ' : ''}deine Stunde in „<strong>${escapeHtml(r.projectTitle)}</strong>" beginnt <strong>${escapeHtml(when)}</strong> (${escapeHtml(r.timezone)}).</p>${cal.html}`,
+        subject: `24pray — ${w.dein} beginnt bald (${r.projectTitle})`,
+        text: `${r.name ? r.name + ', ' : ''}${w.mineLower} in „${r.projectTitle}" ${w.begins} ${when} (${r.timezone}).${cal.text}`,
+        html: `<p>${r.name ? escapeHtml(r.name) + ', ' : ''}${w.mineLower} in „<strong>${escapeHtml(r.projectTitle)}</strong>" ${w.begins} <strong>${escapeHtml(when)}</strong> (${escapeHtml(r.timezone)}).</p>${cal.html}`,
       });
     },
     async sendBookingConfirmation(email, b) {
       const when = formatReminderTime(b);
       const cal = calendarBlock(b.googleUrl, b.icsUrl);
+      const w = slotWords(b.isAllDay);
       const invite = b.projectUrl
         ? {
-            text: `\n\nLade jemanden ein, die Stunde neben dir zu übernehmen: ${b.projectUrl}`,
-            html: `<p>Lade jemanden ein, die Stunde neben dir zu übernehmen: <a href="${escapeHtml(b.projectUrl)}">${escapeHtml(b.projectUrl)}</a></p>`,
+            text: `\n\nLade jemanden ein, ${w.the} neben dir zu übernehmen: ${b.projectUrl}`,
+            html: `<p>Lade jemanden ein, ${w.the} neben dir zu übernehmen: <a href="${escapeHtml(b.projectUrl)}">${escapeHtml(b.projectUrl)}</a></p>`,
           }
         : { text: '', html: '' };
       await transport.sendMail({
         from: config.from,
         to: email,
-        subject: `24pray — deine Gebetsstunde ist eingetragen (${b.projectTitle})`,
-        text: `${b.name ? b.name + ', ' : ''}danke! Deine Stunde in „${b.projectTitle}" ist eingetragen: ${when} (${b.timezone}).${cal.text}${invite.text}`,
-        html: `<p>${b.name ? escapeHtml(b.name) + ', ' : ''}danke! Deine Stunde in „<strong>${escapeHtml(b.projectTitle)}</strong>" ist eingetragen: <strong>${escapeHtml(when)}</strong> (${escapeHtml(b.timezone)}).</p>${cal.html}${invite.html}`,
+        subject: `24pray — ${w.dein} ist eingetragen (${b.projectTitle})`,
+        text: `${b.name ? b.name + ', ' : ''}danke! ${w.mine} in „${b.projectTitle}" ist eingetragen: ${when} (${b.timezone}).${cal.text}${invite.text}`,
+        html: `<p>${b.name ? escapeHtml(b.name) + ', ' : ''}danke! ${w.mine} in „<strong>${escapeHtml(b.projectTitle)}</strong>" ist eingetragen: <strong>${escapeHtml(when)}</strong> (${escapeHtml(b.timezone)}).</p>${cal.html}${invite.html}`,
       });
     },
     async sendBookingNotice(email, n) {
       const when = formatReminderTime(n);
+      const w = slotWords(n.isAllDay);
       await transport.sendMail({
         from: config.from,
         to: email,
-        subject: `24pray — neue Stunde in deiner Gebetswache (${n.projectTitle})`,
-        text: `${n.bookerName} hat eine Stunde in „${n.projectTitle}" übernommen: ${when} (${n.timezone}).`,
-        html: `<p><strong>${escapeHtml(n.bookerName)}</strong> hat eine Stunde in „<strong>${escapeHtml(n.projectTitle)}</strong>" übernommen: <strong>${escapeHtml(when)}</strong> (${escapeHtml(n.timezone)}).</p>`,
+        subject: `24pray — ${w.neu} in deiner Gebetswache (${n.projectTitle})`,
+        text: `${n.bookerName} hat ${w.a} in „${n.projectTitle}" übernommen: ${when} (${n.timezone}).`,
+        html: `<p><strong>${escapeHtml(n.bookerName)}</strong> hat ${w.a} in „<strong>${escapeHtml(n.projectTitle)}</strong>" übernommen: <strong>${escapeHtml(when)}</strong> (${escapeHtml(n.timezone)}).</p>`,
       });
     },
     async sendScheduleChange(email, c) {
-      const oldWhen = formatReminderTime({ startTime: c.oldStartDate, timezone: c.timezone });
-      const newWhen = formatReminderTime({ startTime: c.newStartDate, timezone: c.timezone });
+      const oldWhen = formatReminderTime({ startTime: c.oldStartDate, timezone: c.timezone, isAllDay: c.isAllDay });
+      const newWhen = formatReminderTime({ startTime: c.newStartDate, timezone: c.timezone, isAllDay: c.isAllDay });
       const rows = c.slots.map((s) => ({
-        oldWhen: formatReminderTime({ startTime: s.oldStartTime, timezone: c.timezone }),
-        newWhen: formatReminderTime({ startTime: s.newStartTime, timezone: c.timezone }),
+        oldWhen: formatReminderTime({ startTime: s.oldStartTime, timezone: c.timezone, isAllDay: c.isAllDay }),
+        newWhen: formatReminderTime({ startTime: s.newStartTime, timezone: c.timezone, isAllDay: c.isAllDay }),
       }));
+      const w = slotWords(c.isAllDay);
       const hoursText = rows.map((r) => `  ${r.oldWhen} → ${r.newWhen}`).join('\n');
       const hoursHtml = rows.map((r) => `<li>${escapeHtml(r.oldWhen)} → <strong>${escapeHtml(r.newWhen)}</strong></li>`).join('');
       await transport.sendMail({
         from: config.from,
         to: email,
         subject: `24pray — Zeitplan geändert (${c.projectTitle})`,
-        text: `${c.name ? c.name + ', ' : ''}die Gebetswache „${c.projectTitle}" wurde verschoben: ${oldWhen} → ${newWhen} (${c.timezone}).\n\nDeine Stunden:\n${hoursText}\n\nPasst es nicht mehr? Gib deine Stunde in der Gebetswache frei: ${c.projectUrl}`,
-        html: `<p>${c.name ? escapeHtml(c.name) + ', ' : ''}die Gebetswache „<strong>${escapeHtml(c.projectTitle)}</strong>" wurde verschoben: ${escapeHtml(oldWhen)} → <strong>${escapeHtml(newWhen)}</strong> (${escapeHtml(c.timezone)}).</p><p>Deine Stunden:</p><ul>${hoursHtml}</ul><p>Passt es nicht mehr? <a href="${escapeHtml(c.projectUrl)}">Gib deine Stunde in der Gebetswache frei</a>.</p>`,
+        text: `${c.name ? c.name + ', ' : ''}die Gebetswache „${c.projectTitle}" wurde verschoben: ${oldWhen} → ${newWhen} (${c.timezone}).\n\n${w.minePlural}:\n${hoursText}\n\nPasst es nicht mehr? ${w.release} in der Gebetswache frei: ${c.projectUrl}`,
+        html: `<p>${c.name ? escapeHtml(c.name) + ', ' : ''}die Gebetswache „<strong>${escapeHtml(c.projectTitle)}</strong>" wurde verschoben: ${escapeHtml(oldWhen)} → <strong>${escapeHtml(newWhen)}</strong> (${escapeHtml(c.timezone)}).</p><p>${w.minePlural}:</p><ul>${hoursHtml}</ul><p>Passt es nicht mehr? <a href="${escapeHtml(c.projectUrl)}">${w.release} in der Gebetswache frei</a>.</p>`,
       });
     },
     async sendProjectFarewell(email, f) {
-      const list = f.slots.map((s) => formatReminderTime({ startTime: s, timezone: f.timezone })).join(', ');
+      const list = f.slots.map((s) => formatReminderTime({ startTime: s, timezone: f.timezone, isAllDay: f.isAllDay })).join(', ');
       const plural = f.slots.length > 1;
+      const mine = plural ? slotWords(f.isAllDay).minePlural : slotWords(f.isAllDay).mine;
       await transport.sendMail({
         from: config.from,
         to: email,
         subject: `24pray — Gebetswache beendet (${f.projectTitle})`,
-        text: `Die Gebetswache „${f.projectTitle}" wurde beendet. Deine Stunde${plural ? `n am ${list} finden` : ` am ${list} findet`} nicht mehr statt. Danke fürs Mitwachen.`,
-        html: `<p>Die Gebetswache „<strong>${escapeHtml(f.projectTitle)}</strong>" wurde beendet. Deine Stunde${plural ? `n am <strong>${escapeHtml(list)}</strong> finden` : ` am <strong>${escapeHtml(list)}</strong> findet`} nicht mehr statt. Danke fürs Mitwachen.</p>`,
+        text: `Die Gebetswache „${f.projectTitle}" wurde beendet. ${mine}${plural ? ` am ${list} finden` : ` am ${list} findet`} nicht mehr statt. Danke fürs Mitwachen.`,
+        html: `<p>Die Gebetswache „<strong>${escapeHtml(f.projectTitle)}</strong>" wurde beendet. ${mine}${plural ? ` am <strong>${escapeHtml(list)}</strong> finden` : ` am <strong>${escapeHtml(list)}</strong> findet`} nicht mehr statt. Danke fürs Mitwachen.</p>`,
       });
     },
     async sendUpdateNotice(email, n) {

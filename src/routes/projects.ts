@@ -308,6 +308,7 @@ export function projectRoutes(
               newStartTime: new Date(s.startTime.getTime() + deltaMs).toISOString(),
             })),
             projectUrl: `${env.APP_URL}/projects/${id}`,
+            isAllDay: updatedProject.slotDurationMinutes === 1440,
           }).catch((err) => console.error(`[mail] schedule change failed for ${r.email}:`, err));
         }
       }
@@ -341,6 +342,7 @@ export function projectRoutes(
           projectTitle: project.title,
           timezone: project.timezone,
           slots: r.slots.map((s) => s.startTime.toISOString()),
+          isAllDay: project.slotDurationMinutes === 1440,
         }).catch((err) => console.error(`[mail] project farewell failed for ${r.email}:`, err));
       }
     }

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
-import type { Mailer } from '../lib/mailer.js';
+import { slotWords, type Mailer } from '../lib/mailer.js';
 import type { Env } from '../env.js';
 import { buildIcs, googleCalendarUrl, type CalendarEvent } from '../lib/calendar.js';
 import { generateToken, safeEqual, singleHeader } from '../lib/tokens.js';
@@ -35,7 +35,7 @@ export function slotRoutes(
     project: { slotDurationMinutes: number; timezone: string },
   ): CalendarEvent => ({
     uid: slot.id,
-    title: `Gebetsstunde — ${title}`,
+    title: `${slotWords(project.slotDurationMinutes === 1440).prayer} — ${title}`,
     startTime: slot.startTime,
     endTime: slot.endTime,
     url: env ? `${env.APP_URL}/projects/${slot.projectId}` : undefined,
@@ -209,7 +209,10 @@ export function slotRoutes(
     if (!slot) throw httpError(404, 'Slot nicht gefunden');
     reply
       .header('content-type', 'text/calendar; charset=utf-8')
-      .header('content-disposition', 'attachment; filename="24pray-gebetsstunde.ics"');
+      .header(
+        'content-disposition',
+        `attachment; filename="24pray-${slot.project.slotDurationMinutes === 1440 ? 'gebetstag' : 'gebetsstunde'}.ics"`,
+      );
     return buildIcs(slotEvent(slot, slot.project.title, slot.project));
   });
 

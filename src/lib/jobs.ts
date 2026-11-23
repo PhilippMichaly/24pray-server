@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import type { Mailer } from './mailer.js';
+import { slotWords, type Mailer } from './mailer.js';
 import { googleCalendarUrl } from './calendar.js';
 import { pushToUsers, type PushSender } from './push.js';
 
@@ -48,7 +48,7 @@ export async function sendDueReminders(
       const isAllDay = slot.project.slotDurationMinutes === 1440;
       const ev = {
         uid: slot.id,
-        title: `Gebetsstunde — ${slot.project.title}`,
+        title: `${slotWords(isAllDay).prayer} — ${slot.project.title}`,
         startTime: slot.startTime,
         endTime: slot.endTime,
         url: appUrl ? `${appUrl}/projects/${slot.projectId}` : undefined,
@@ -70,7 +70,7 @@ export async function sendDueReminders(
       if (pushSender && slot.userId) {
         pushToUsers(prisma, pushSender, [slot.userId], {
           title: `24pray — ${slot.project.title}`,
-          body: 'Deine Gebetsstunde beginnt bald.',
+          body: isAllDay ? 'Dein Gebetstag beginnt bald.' : 'Deine Gebetsstunde beginnt bald.',
           url: appUrl ? `${appUrl}/projects/${slot.projectId}` : `/projects/${slot.projectId}`,
         }).catch((err) => console.error('[push] reminder push failed:', err));
       }

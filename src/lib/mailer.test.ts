@@ -239,3 +239,83 @@ describe('HTML-Escaping in Mail-Templates (Security)', () => {
     expect(escapeHtml(`'`)).toBe('&#39;');
   });
 });
+
+describe('Tages-Wachen: Mails sprechen von Tagen, nicht von Stunden', () => {
+  function setup() {
+    const sendMail = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(nodemailer, 'createTransport').mockReturnValue({ sendMail } as never);
+    const mailer = createMailer({ smtpUrl: 'smtp://fake', from: 'no-reply@24pray.org' });
+    return { mailer, sendMail };
+  }
+  const sent = (sendMail: ReturnType<typeof vi.fn>) =>
+    sendMail.mock.calls[0][0] as { subject: string; html: string; text: string };
+  const all = (m: { subject: string; html: string; text: string }) => `${m.subject}\n${m.text}\n${m.html}`;
+  const base = { startTime: '2026-07-14T02:00:00.000Z', timezone: 'UTC', projectTitle: 'Fastenzeit' };
+
+  async function renderAll(isAllDay: boolean) {
+    const out: string[] = [];
+    {
+      const { mailer, sendMail } = setup();
+      await mailer.sendReminder!('a@b', { ...base, name: 'Ruth', isAllDay });
+      out.push(all(sent(sendMail)));
+    }
+    {
+      const { mailer, sendMail } = setup();
+      await mailer.sendBookingConfirmation!('a@b', {
+        ...base, name: 'Ruth', isAllDay, icsUrl: 'http://x/i', googleUrl: 'http://x/g', projectUrl: 'http://x/p',
+      });
+      out.push(all(sent(sendMail)));
+    }
+    {
+      const { mailer, sendMail } = setup();
+      await mailer.sendBookingNotice!('a@b', { ...base, bookerName: 'Ruth', endTime: '2026-07-15T02:00:00.000Z', isAllDay });
+      out.push(all(sent(sendMail)));
+    }
+    {
+      const { mailer, sendMail } = setup();
+      await mailer.sendScheduleChange!('a@b', {
+        name: 'Ruth', projectTitle: base.projectTitle, oldStartDate: base.startTime, newStartDate: '2026-07-16T02:00:00.000Z',
+        timezone: 'UTC', slots: [{ oldStartTime: base.startTime, newStartTime: '2026-07-16T02:00:00.000Z' }],
+        projectUrl: 'http://x/p', isAllDay,
+      });
+      out.push(all(sent(sendMail)));
+    }
+    for (const slots of [[base.startTime], [base.startTime, '2026-07-15T02:00:00.000Z']]) {
+      const { mailer, sendMail } = setup();
+      await mailer.sendProjectFarewell!('a@b', { name: 'Ruth', projectTitle: base.projectTitle, timezone: 'UTC', slots, isAllDay });
+      out.push(all(sent(sendMail)));
+    }
+    return out;
+  }
+
+  it('Tages-Wache: keine einzige Mail enthält „Stunde"', async () => {
+    for (const mail of await renderAll(true)) {
+      expect(mail).not.toMatch(/stunde/i);
+      expect(mail).toMatch(/Tag/);
+    }
+  });
+
+  it('Stunden-Wache: Wording bleibt bei „Stunde"', async () => {
+    for (const mail of await renderAll(false)) expect(mail).toMatch(/Stunde/);
+  });
+
+  it('Tages-Wache: Zeitplan- und Abschiedsmail zeigen das Datum statt Wochentag+Uhrzeit', async () => {
+    const [, , , schedule, farewell] = await renderAll(true);
+    expect(schedule).toContain('14. Juli');
+    expect(schedule).toContain('16. Juli');
+    expect(schedule).not.toContain('02:00');
+    expect(farewell).toContain('14. Juli');
+    expect(farewell).not.toContain('02:00');
+  });
+
+  it('Betreiber-Notiz zur Buchung nennt bei Tages-Wachen den Tag', async () => {
+    const { mailer, sendMail } = setup();
+    await mailer.sendAdminNotice!('op@b', {
+      kind: 'slot_booked', projectTitle: 'Fastenzeit', bookerName: 'Ruth', isGuest: true, isFirstBooking: true,
+      startTime: base.startTime, timezone: 'UTC', isAllDay: true, bookedSlots: 1, projectUrl: 'http://x/p',
+    });
+    const m = all(sent(sendMail));
+    expect(m).not.toMatch(/stunde/i);
+    expect(m).toContain('ERSTER Tag übernommen');
+  });
+});
